@@ -12,15 +12,23 @@ export type DataFormCreateRoom = {
     maxParticipants: number
 }
 
+export type TeamCommand = 'red' | 'blue'
+
+export type RoomMessage = {
+  command: TeamCommand
+  createdAt: string
+  text: string
+}
+
 export type InfoRoom = {
-  roomId: string,
-  roomName: string,
-  quizTheme: string,
-  maxParticipants: number,
-  messages?: Array<{
-    command: 'red' | 'blue'
-    createdAt: string
-    text: string
+  roomId: number
+  roomName: string
+  quizTheme: string
+  maxParticipants: number
+  messages?: RoomMessage[]
+  participants?: Array<{
+    id: number // id socket
+    command: TeamCommand,
+    role: 'host' | 'participant'
   }>
-  participants?: Array<any>
 }

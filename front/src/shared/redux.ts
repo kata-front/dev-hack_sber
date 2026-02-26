@@ -1,13 +1,14 @@
 import { configureStore } from "@reduxjs/toolkit";
-import { pinApi } from "../components/startWindow/pinApi";
 import { useDispatch, useSelector } from "react-redux";
+import { baseApi } from "./baseApi";
 
 export const store = configureStore({
     reducer: {
-        [pinApi.reducerPath]: pinApi.reducer,
+        [baseApi.reducerPath]: baseApi.reducer,
+        //user: 
     },
     middleware: (getDefaultMiddleware) =>
-        getDefaultMiddleware().concat(pinApi.middleware),
+        getDefaultMiddleware().concat(baseApi.middleware),
 }); 
 
 export type RootState = ReturnType<typeof store.getState>;

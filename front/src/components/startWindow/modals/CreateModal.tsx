@@ -48,7 +48,7 @@ function CreateModal() {
       setError('Не удалось создать комнату. Попробуйте снова.')
     }
 
-    navigate('/room')
+    navigate(`/room/${response.roomId}`)
   }
 
   const nameInvalid = submitted && !roomName.trim()

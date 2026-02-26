@@ -32,7 +32,35 @@ export const socketApi = baseApi.injectEndpoints({
                 socket.disconnect();
             }
         }),
+        initJoiningRoom: build.query<InfoRoom, number>({
+            query: (roomId) => `/join_room/${roomId}`,
+
+            async onCacheEntryAdded(
+                payload,
+                { cacheDataLoaded, cacheEntryRemoved, updateCachedData }
+            ) {
+                await cacheDataLoaded;
+
+                const socket = socketService.connect();
+
+                socket.emit("join_room", payload);
+
+                socket.on("room_joined", (data) => {
+                    updateCachedData(() => data);
+                });
+                
+                socket.on('message', (message) => {
+                    updateCachedData((draft) => {
+                        draft.messages = [...(draft.messages || []), message];
+                    });
+                });
+
+                await cacheEntryRemoved;
+                
+                socket.disconnect();
+            }
+        }),
     })
 });
 
-export const { useInitCreatingRoomQuery } = socketApi;
+export const { useInitCreatingRoomQuery, useInitJoiningRoomQuery } = socketApi;
