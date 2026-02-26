@@ -25,6 +25,7 @@ export type InfoRoom = {
   roomName: string
   quizTheme: string
   maxParticipants: number
+  team?: TeamCommand
   messages?: RoomMessage[]
   participants?: Array<{
     id: number // id socket

@@ -1,0 +1,284 @@
+openapi: 3.0.3
+info:
+  title: Dev Hack Sber API
+  version: 1.0.0
+  description: >-
+    REST endpoints inferred from the frontend RTK Query slices plus documented
+    Socket.IO interactions (see x-socket-io).
+servers:
+  - url: http://localhost:5173
+paths:
+  /check_pin:
+    post:
+      summary: Check room PIN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckPinRequest"
+            examples:
+              sample:
+                value:
+                  pin: 1234
+      responses:
+        "200":
+          description: PIN check result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+              examples:
+                ok:
+                  value:
+                    ok: true
+                    roomId: 101
+                failed:
+                  value:
+                    ok: false
+  /create_room:
+    post:
+      summary: Create a room
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DataFormCreateRoom"
+            examples:
+              sample:
+                value:
+                  roomId: 101
+                  roomName: "Team Alpha"
+                  quizTheme: "History"
+                  maxParticipants: 8
+      responses:
+        "200":
+          description: Room creation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+              examples:
+                ok:
+                  value:
+                    ok: true
+                    roomId: 101
+                failed:
+                  value:
+                    ok: false
+  /create_room/{roomId}:
+    get:
+      summary: Init room (host)
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int32
+      responses:
+        "200":
+          description: Room snapshot for host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoomInitResponse"
+  /join_room/{roomId}:
+    get:
+      summary: Init room (participant)
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int32
+      responses:
+        "200":
+          description: Room snapshot for participant
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoomInitResponse"
+components:
+  schemas:
+    CheckPinRequest:
+      type: object
+      required:
+        - pin
+      properties:
+        pin:
+          type: integer
+          format: int32
+    LoginResponse:
+      type: object
+      required:
+        - ok
+      properties:
+        ok:
+          type: boolean
+        roomId:
+          type: integer
+          format: int32
+    DataFormCreateRoom:
+      type: object
+      required:
+        - roomId
+        - roomName
+        - quizTheme
+        - maxParticipants
+      properties:
+        roomId:
+          type: integer
+          format: int32
+        roomName:
+          type: string
+        quizTheme:
+          type: string
+        maxParticipants:
+          type: integer
+          format: int32
+    TeamCommand:
+      type: string
+      enum:
+        - red
+        - blue
+    RoomMessage:
+      type: object
+      required:
+        - command
+        - createdAt
+        - text
+      properties:
+        command:
+          $ref: "#/components/schemas/TeamCommand"
+        createdAt:
+          type: string
+          format: date-time
+        text:
+          type: string
+    RoomMessageOutbound:
+      type: object
+      required:
+        - roomId
+        - text
+        - command
+        - createdAt
+      properties:
+        roomId:
+          type: integer
+          format: int32
+        text:
+          type: string
+        command:
+          $ref: "#/components/schemas/TeamCommand"
+        createdAt:
+          type: string
+          format: date-time
+    Participant:
+      type: object
+      required:
+        - id
+        - command
+        - role
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Socket id
+        command:
+          $ref: "#/components/schemas/TeamCommand"
+        role:
+          type: string
+          enum:
+            - host
+            - participant
+    InfoRoom:
+      type: object
+      required:
+        - roomId
+        - roomName
+        - quizTheme
+        - maxParticipants
+      properties:
+        roomId:
+          type: integer
+          format: int32
+        roomName:
+          type: string
+        quizTheme:
+          type: string
+        maxParticipants:
+          type: integer
+          format: int32
+        team:
+          $ref: "#/components/schemas/TeamCommand"
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/RoomMessage"
+        participants:
+          type: array
+          items:
+            $ref: "#/components/schemas/Participant"
+    RoomInitResponse:
+      allOf:
+        - $ref: "#/components/schemas/InfoRoom"
+        - type: object
+          required:
+            - role
+            - team
+          properties:
+            role:
+              type: string
+              enum:
+                - host
+                - participant
+            team:
+              $ref: "#/components/schemas/TeamCommand"
+
+x-socket-io:
+  server: http://localhost:3000
+  namespace: "/"
+  events:
+    - event: create_room
+      direction: client->server
+      description: Emit after GET /create_room/{roomId} to subscribe as host.
+      payload:
+        type: object
+        required:
+          - roomId
+        properties:
+          roomId:
+            type: integer
+            format: int32
+    - event: room_created
+      direction: server->client
+      description: Initial snapshot after host connected.
+      payload:
+        $ref: "#/components/schemas/RoomInitResponse"
+    - event: join_room
+      direction: client->server
+      description: Emit after GET /join_room/{roomId} to subscribe as participant.
+      payload:
+        type: object
+        required:
+          - roomId
+        properties:
+          roomId:
+            type: integer
+            format: int32
+    - event: room_joined
+      direction: server->client
+      description: Initial snapshot after participant connected.
+      payload:
+        $ref: "#/components/schemas/RoomInitResponse"
+    - event: message
+      direction: bidirectional
+      description: Chat message send/receive.
+      payload:
+        send:
+          $ref: "#/components/schemas/RoomMessageOutbound"
+        receive:
+          $ref: "#/components/schemas/RoomMessage"

@@ -1,0 +1,203 @@
+.room-card--full {
+  grid-column: span 12;
+}
+
+.room-card--admin {
+  border-color: rgba(128, 255, 212, 0.35);
+  background: rgba(6, 12, 24, 0.9);
+  box-shadow: 0 28px 70px rgba(10, 30, 45, 0.65);
+}
+
+.room-admin {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.room-admin__header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+.room-admin__status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.room-badge {
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+  background: rgba(15, 24, 40, 0.7);
+  border: 1px solid rgba(56, 207, 255, 0.2);
+  color: var(--text);
+}
+
+.room-badge--live {
+  background: linear-gradient(120deg, rgba(56, 207, 255, 0.25), rgba(128, 255, 212, 0.2));
+  border-color: rgba(128, 255, 212, 0.6);
+  color: #d8fff2;
+}
+
+.room-admin__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.room-admin__panel {
+  border-radius: 18px;
+  padding: 1.2rem;
+  background: rgba(10, 18, 32, 0.85);
+  border: 1px solid rgba(56, 207, 255, 0.12);
+  display: grid;
+  gap: 0.85rem;
+}
+
+.room-admin__panel h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.room-admin__stat {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.room-progress {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(56, 207, 255, 0.15);
+  overflow: hidden;
+}
+
+.room-progress__bar {
+  height: 100%;
+  background: linear-gradient(120deg, #38cfff, #2b7bff);
+  border-radius: inherit;
+}
+
+.room-admin__toggles {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.room-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid rgba(56, 207, 255, 0.18);
+  background: rgba(8, 14, 28, 0.7);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.room-toggle:hover {
+  transform: translateY(-1px);
+  border-color: rgba(56, 207, 255, 0.45);
+  box-shadow: 0 14px 28px rgba(10, 24, 45, 0.45);
+}
+
+.room-toggle__meta {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.room-toggle__title {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.room-toggle__desc {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.room-toggle__pill {
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(56, 207, 255, 0.35);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  min-width: 54px;
+  text-align: center;
+}
+
+.room-toggle.is-active {
+  border-color: rgba(128, 255, 212, 0.55);
+  background: rgba(12, 26, 36, 0.9);
+  box-shadow: 0 16px 30px rgba(8, 30, 40, 0.45);
+}
+
+.room-toggle.is-active .room-toggle__pill {
+  background: rgba(128, 255, 212, 0.18);
+  border-color: rgba(128, 255, 212, 0.7);
+  color: #d8fff2;
+}
+
+.room-admin__teams {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.room-admin__team {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.7rem;
+  border-radius: 14px;
+  border: 1px solid rgba(56, 207, 255, 0.15);
+  background: rgba(9, 16, 30, 0.6);
+}
+
+.room-admin__team-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.room-admin__team--red {
+  border-color: rgba(255, 106, 106, 0.4);
+  background: linear-gradient(120deg, rgba(64, 16, 24, 0.5), rgba(10, 16, 28, 0.85));
+}
+
+.room-admin__team--blue {
+  border-color: rgba(56, 207, 255, 0.35);
+  background: linear-gradient(120deg, rgba(12, 36, 60, 0.45), rgba(10, 16, 28, 0.85));
+}
+
+.room-admin__team--red .room-progress__bar {
+  background: linear-gradient(120deg, #ff6a6a, #ffb3b3);
+}
+
+.room-admin__team--blue .room-progress__bar {
+  background: linear-gradient(120deg, #38cfff, #2b7bff);
+}
+
+@media (max-width: 1024px) {
+  .room-card--full {
+    grid-column: span 12;
+  }
+}
+
+@media (max-width: 760px) {
+  .room-admin__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

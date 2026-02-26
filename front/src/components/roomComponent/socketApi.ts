@@ -1,11 +1,11 @@
 import { baseApi } from "../../shared/baseApi";
-import type { InfoRoom } from "../../shared/types";
+import type { InfoRoom, TeamCommand } from "../../shared/types";
 import { socketService } from "../../shared/socketServise";
 
 export const socketApi = baseApi.injectEndpoints({
     endpoints: (build) => ({
-        initCreatingRoom: build.query<InfoRoom, number>({
-            query: (roomId) => `/init_room/${roomId}`,
+        initCreatingRoom: build.query<InfoRoom & {role: 'host' | 'participant', team: TeamCommand}, number>({
+            query: (roomId) => `/create_room/${roomId}`,
 
             async onCacheEntryAdded(
                 payload,
@@ -32,7 +32,7 @@ export const socketApi = baseApi.injectEndpoints({
                 socket.disconnect();
             }
         }),
-        initJoiningRoom: build.query<InfoRoom, number>({
+        initJoiningRoom: build.query<InfoRoom & {role: 'host' | 'participant', team: TeamCommand}, number>({
             query: (roomId) => `/join_room/${roomId}`,
 
             async onCacheEntryAdded(
