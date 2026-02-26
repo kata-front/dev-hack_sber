@@ -1,10 +1,11 @@
-﻿.modal-page {
+.modal-page {
   position: relative;
   min-height: 100svh;
   display: grid;
   place-items: center;
-  padding: clamp(1.5rem, 4vw, 4.5rem);
-  padding-bottom: calc(clamp(1.5rem, 4vw, 4.5rem) + env(safe-area-inset-bottom));
+  padding: clamp(1.25rem, 4vw, 4.5rem);
+  padding-top: calc(clamp(1.25rem, 4vw, 4.5rem) + env(safe-area-inset-top));
+  padding-bottom: calc(clamp(1.25rem, 4vw, 4.5rem) + env(safe-area-inset-bottom));
   overflow: hidden;
 }
 
@@ -52,16 +53,18 @@
   position: relative;
   z-index: 1;
   width: min(560px, 100%);
+  min-width: 0;
   display: grid;
   gap: 1.4rem;
-  padding: clamp(1.6rem, 3vw, 2.5rem);
+  padding: clamp(1.4rem, 3vw, 2.5rem);
   background: rgba(8, 14, 28, 0.86);
   border: 1px solid var(--border);
-  border-radius: 24px;
+  border-radius: clamp(18px, 4vw, 24px);
   box-shadow: 0 30px 80px rgba(4, 8, 18, 0.65);
   backdrop-filter: blur(18px);
   max-height: calc(100svh - 3rem);
   overflow: hidden;
+  transition: box-shadow 0.3s ease;
 }
 
 .modal-header {
@@ -80,7 +83,7 @@
 
 .modal-title {
   margin: 0;
-  font-size: clamp(1.6rem, 2.5vw, 2rem);
+  font-size: clamp(1.5rem, 3vw, 2rem);
 }
 
 .modal-subtitle {
@@ -92,9 +95,10 @@
 .modal-body {
   display: grid;
   gap: 0.9rem;
-  min-height: 150px;
+  min-height: clamp(96px, 20vh, 150px);
   overflow: auto;
   padding-right: 0.15rem;
+  -webkit-overflow-scrolling: touch;
 }
 
 .modal-field {
@@ -214,14 +218,78 @@
   }
 }
 
+.modal-page .orb--one {
+  width: clamp(280px, 68vw, 520px);
+  height: clamp(280px, 68vw, 520px);
+  left: clamp(-180px, -26vw, -120px);
+  top: clamp(-220px, -26vw, -160px);
+}
+
+.modal-page .orb--two {
+  width: clamp(240px, 58vw, 420px);
+  height: clamp(240px, 58vw, 420px);
+  right: clamp(-200px, -28vw, -140px);
+  bottom: clamp(-200px, -28vw, -160px);
+}
+
 @media (max-width: 600px) {
   .modal-card {
-    padding: 1.4rem;
     gap: 1.2rem;
+  }
+}
+
+@media (max-width: 520px) {
+  .modal-card {
+    padding: 1.2rem;
+    gap: 1.1rem;
   }
 
   .modal-title {
     font-size: 1.45rem;
+  }
+
+  .modal-body {
+    min-height: auto;
+  }
+
+  .modal-page .grid-glow {
+    background-size: 64px 64px;
+    opacity: 0.2;
+  }
+}
+
+@media (max-width: 560px), (max-height: 720px) {
+  .modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    padding-right: 0;
+  }
+
+  .modal-action {
+    order: -1;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    width: 100%;
+    margin-bottom: 0.2rem;
+    box-shadow: 0 16px 30px rgba(56, 207, 255, 0.22);
+  }
+}
+
+@media (max-width: 420px) {
+  .modal-field {
+    font-size: 0.68rem;
+    letter-spacing: 0.12em;
+  }
+
+  .modal-field input {
+    font-size: 0.95rem;
+    padding: 0.75rem 0.9rem;
+  }
+
+  .modal-action {
+    width: 100%;
   }
 }
 
@@ -232,5 +300,15 @@
 
   .modal-body {
     min-height: auto;
+  }
+}
+
+@media (max-height: 640px) {
+  .modal-page {
+    place-items: start center;
+  }
+
+  .modal-card {
+    margin-top: clamp(0.5rem, 3vh, 1.5rem);
   }
 }

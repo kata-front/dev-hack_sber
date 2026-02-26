@@ -1,15 +1,16 @@
 import { baseApi } from "../../shared/baseApi";
+import type { LoginResponse } from "../../shared/types";
 
 export const pinApi = baseApi.injectEndpoints({
     endpoints: (build) => ({
-        checkPin: build.mutation<boolean, number>({
+        checkPin: build.mutation<LoginResponse, number>({
             query: user_pin => ({
                 url: "/check_pin",
                 method: "POST",
                 body: { pin: user_pin },
             }),
         }),
-        createRoom: build.mutation<boolean, {
+        createRoom: build.mutation<LoginResponse, {
             roomName: string;
             quizTheme: string;
             maxParticipants: number;

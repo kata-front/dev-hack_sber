@@ -1,1 +1,0 @@
-export type startAction = 'join' | 'create' | null

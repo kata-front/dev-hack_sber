@@ -40,9 +40,9 @@ function CreateModal() {
       maxParticipants: maxValue,
     }
 
-    const ok = createRoom(payload).unwrap()
+    const response = await createRoom(payload).unwrap()
 
-    if (!ok) {
+    if (!response.ok) {
       setError('Не удалось создать комнату. Попробуйте снова.')
     }
 

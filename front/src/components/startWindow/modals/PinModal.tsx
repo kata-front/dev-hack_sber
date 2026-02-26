@@ -18,10 +18,10 @@ function PinModal() {
     }
 
     try {
-      const ok = await checkPin(value).unwrap()
-      if (ok) {
+      const response = await checkPin(value).unwrap()
+      if (response.ok) {
         setShowError(false)
-        navigate('/room')
+        navigate(`/room/${response.roomId}`)
       } else {
         setShowError(true)
       }

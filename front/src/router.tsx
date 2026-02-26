@@ -21,7 +21,7 @@ export const router = createBrowserRouter([
                 element: <ActionButtons />
             },
             {
-                path: "/room",
+                path: "/room/:roomId",
                 element: <Room />
             }
         ]
