@@ -1,5 +1,5 @@
 import { baseApi } from "../../shared/baseApi";
-import type { LoginResponse } from "../../shared/types";
+import type { DataFormCreateRoom, LoginResponse } from "../../shared/types";
 
 export const pinApi = baseApi.injectEndpoints({
     endpoints: (build) => ({
@@ -10,11 +10,7 @@ export const pinApi = baseApi.injectEndpoints({
                 body: { pin: user_pin },
             }),
         }),
-        createRoom: build.mutation<LoginResponse, {
-            roomName: string;
-            quizTheme: string;
-            maxParticipants: number;
-        }>({
+        createRoom: build.mutation<LoginResponse, DataFormCreateRoom>({
             query: roomInfo => ({
                 url: "/create_room",
                 method: "POST",

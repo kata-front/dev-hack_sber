@@ -2,6 +2,7 @@
 import ModalShell from './ModalShell'
 import { useCreateRoomMutation } from '../pinApi'
 import { useNavigate } from 'react-router-dom'
+import type { DataFormCreateRoom } from '../../../shared/types'
 
 function CreateModal() {
   const navigate = useNavigate()
@@ -34,7 +35,8 @@ function CreateModal() {
 
     setError('')
 
-    const payload = {
+    const payload: DataFormCreateRoom = {
+      roomId: Date.now(),
       roomName: nameValue,
       quizTheme: themeValue,
       maxParticipants: maxValue,
