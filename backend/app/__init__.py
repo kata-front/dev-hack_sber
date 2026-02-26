@@ -1,0 +1,2 @@
+"""QuizBattle API package."""
+
