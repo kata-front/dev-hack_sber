@@ -256,6 +256,12 @@
   margin-top: 0.6rem;
 }
 
+.room-game__controls {
+  display: grid;
+  gap: 0.5rem;
+  justify-items: start;
+}
+
 .room-chip {
   border: 1px solid var(--team-input-border);
   background: rgba(15, 24, 40, 0.6);
@@ -309,6 +315,13 @@
   background: transparent;
   color: var(--text);
   border: 1px solid var(--border);
+}
+
+.room-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 .room-text--error {

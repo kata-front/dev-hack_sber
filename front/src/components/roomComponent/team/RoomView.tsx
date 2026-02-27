@@ -8,6 +8,7 @@ import type {
   TeamCommand,
 } from '../../../shared/types'
 import AdminPanel from '../adminPanel/AdminPanel'
+import type { AdminPanelActions, AdminPanelState } from '../adminPanel/adminTypes'
 import '../Room.scss'
 
 const formatTime = (value?: string) => {
@@ -44,6 +45,7 @@ export type GameViewState = {
   selectedAnswer: string | null
   canAnswer: boolean
   answerStatus?: AnswerStatus
+  isPaused: boolean
 }
 
 export type RoomViewProps = {
@@ -61,10 +63,15 @@ export type RoomViewProps = {
   messageEndRef: RefObject<HTMLLIElement | null>
   gameView: GameViewState
   onStartGame: () => void
+  onNextQuestion: () => void
   onAnswer: (answer: string) => void
   isStartingGame: boolean
+  isAdvancingQuestion: boolean
+  canRequestNextQuestion: boolean
   isHost: boolean
   isStartDisabled: boolean
+  adminState: AdminPanelState
+  adminActions: AdminPanelActions
 }
 
 function RoomView({
@@ -75,17 +82,22 @@ function RoomView({
   isError,
   canInitRoom,
   messages,
-  participantsCount, 
+  participantsCount,
   draft,
   onDraftChange,
   onSend,
   messageEndRef,
   gameView,
   onStartGame,
+  onNextQuestion,
   onAnswer,
   isStartingGame,
+  isAdvancingQuestion,
+  canRequestNextQuestion,
   isHost,
   isStartDisabled,
+  adminState,
+  adminActions,
 }: RoomViewProps) {
   const roomIdLabel = data?.roomId ?? roomId ?? '—'
   const teamLabel = getTeamLabel(team)
@@ -95,12 +107,14 @@ function RoomView({
   const hasActiveQuestion = Boolean(gameView.activeQuestion)
   const isGameFinished = gameView.status === 'finished'
   const startLabel = isHost ? (isStartingGame ? 'Запуск...' : 'Старт раунда') : 'Ожидание старта'
+  const nextLabel = isAdvancingQuestion ? 'Загрузка...' : 'Следующий вопрос'
   const statusLabel = getStatusLabel(gameView.status)
   const statusTone = getStatusTone(gameView.status)
   const questionsLabel =
     gameView.totalQuestions > 0
       ? `${gameView.activeQuestionIndex} / ${gameView.totalQuestions}`
       : '—'
+  const timerLabel = gameView.isPaused ? 'Пауза' : `${gameView.timeLeft}с`
 
   return (
     <div className={`room-page ${pageClass}`}>
@@ -203,7 +217,7 @@ function RoomView({
                   className={`room-tag ${gameView.isTimeUp ? 'room-tag--danger' : ''}`}
                   aria-live="polite"
                 >
-                  Таймер: {gameView.timeLeft}с
+                  Таймер: {timerLabel}
                 </span>
               </div>
             </div>
@@ -260,6 +274,20 @@ function RoomView({
                 )}
               </>
             )}
+
+            {isHost && gameView.status === 'active' && (
+              <div className="room-game__controls">
+                <button
+                  className="room-btn room-btn--ghost"
+                  type="button"
+                  onClick={onNextQuestion}
+                  disabled={!canRequestNextQuestion || isAdvancingQuestion}
+                >
+                  {nextLabel}
+                </button>
+                <p className="room-text">Следующий вопрос открывается кнопкой хоста.</p>
+              </div>
+            )}
           </div>
         </article>
 
@@ -305,16 +333,16 @@ function RoomView({
             <form className="room-chat__composer" onSubmit={onSend}>
               <input
                 type="text"
-                placeholder="Ваше сообщение"
+                placeholder={adminState.isChatMuted ? 'Чат на паузе' : 'Ваше сообщение'}
                 value={draft}
                 onChange={(event) => onDraftChange(event.target.value)}
                 maxLength={300}
+                disabled={adminState.isChatMuted}
               />
               <button
                 className="room-btn room-btn--primary"
                 type="submit"
-                disabled={!draft.trim() || !canInitRoom}
-                onClick={() => onSend}
+                disabled={!draft.trim() || !canInitRoom || adminState.isChatMuted}
               >
                 Отправить
               </button>
@@ -330,7 +358,12 @@ function RoomView({
             maxParticipants={data?.maxParticipants}
             onStartGame={onStartGame}
             isStartDisabled={isStartDisabled}
+            onNextQuestion={onNextQuestion}
+            isNextQuestionDisabled={!canRequestNextQuestion}
+            isNextQuestionLoading={isAdvancingQuestion}
             gameView={gameView}
+            adminState={adminState}
+            adminActions={adminActions}
           />
         )}
       </section>
@@ -339,4 +372,3 @@ function RoomView({
 }
 
 export default RoomView
-

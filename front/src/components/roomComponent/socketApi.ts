@@ -1,147 +1,163 @@
-import { baseApi } from "../../shared/baseApi";
-import type { InfoRoom, Parsicipant, TeamCommand } from "../../shared/types";
-import { socketService } from "../../shared/socketServise";
+import { baseApi } from '../../shared/baseApi'
+import type { InfoRoom, Parsicipant, TeamCommand } from '../../shared/types'
+import { socketService } from '../../shared/socketServise'
+
+type RoomSnapshotBase = InfoRoom & { role: 'host' | 'participant' }
+type HostSnapshot = RoomSnapshotBase
+type ParticipantSnapshot = RoomSnapshotBase & { team: TeamCommand }
+type SelfParticipantIdPayload = {
+  participantId?: number | string
+  selfParticipantId?: number | string
+  playerId?: number | string
+}
+
+const toParticipantKey = (value: unknown) => {
+  if (value === null || value === undefined) return null
+  return String(value)
+}
+
+const isSameParticipant = (left: unknown, right: unknown) => {
+  const leftKey = toParticipantKey(left)
+  const rightKey = toParticipantKey(right)
+  return leftKey !== null && rightKey !== null && leftKey === rightKey
+}
+
+const resolveSelfParticipantKey = (
+  snapshot: RoomSnapshotBase,
+  socketId?: string
+) => {
+  const payload = snapshot as SelfParticipantIdPayload
+  const fromPayload =
+    payload.participantId ?? payload.selfParticipantId ?? payload.playerId
+  const payloadKey = toParticipantKey(fromPayload)
+  if (payloadKey) return payloadKey
+
+  if (socketId && snapshot.participants) {
+    const socketMatch = snapshot.participants.find((participant) =>
+      isSameParticipant(participant.id, socketId)
+    )
+    if (socketMatch) return toParticipantKey(socketMatch.id)
+  }
+
+  const last = snapshot.participants?.[snapshot.participants.length - 1]
+  return toParticipantKey(last?.id)
+}
+
+const addParticipantIfMissing = (
+  participants: Parsicipant[],
+  incoming: Parsicipant
+) => {
+  const exists = participants.some((participant) =>
+    isSameParticipant(participant.id, incoming.id)
+  )
+  if (exists) return participants
+  return [...participants, incoming]
+}
+
+const handleRoomSocketFlow = <TSnapshot extends RoomSnapshotBase>(
+  roomId: number,
+  socketJoinEvent: 'create_room' | 'join_room',
+  socketSnapshotEvent: 'room_created' | 'room_joined',
+  updateCachedData: (recipe: (draft: TSnapshot) => void) => void
+) => {
+  const socket = socketService.connect()
+  let selfParticipantKey: string | null = null
+
+  const onSnapshot = (snapshot: TSnapshot) => {
+    selfParticipantKey = resolveSelfParticipantKey(snapshot, socket.id)
+    updateCachedData(() => snapshot)
+  }
+
+  const onPlayerJoined = (participant: Parsicipant) => {
+    updateCachedData((draft) => {
+      const participants = draft.participants ?? []
+      draft.participants = addParticipantIfMissing(participants, participant)
+    })
+
+    if (!selfParticipantKey && socket.id && isSameParticipant(participant.id, socket.id)) {
+      selfParticipantKey = toParticipantKey(participant.id)
+    }
+  }
+
+  const onMessage = (message: NonNullable<InfoRoom['messages']>[number]) => {
+    updateCachedData((draft) => {
+      draft.messages = [...(draft.messages ?? []), message]
+    })
+  }
+
+  const onUserLeft = (leftParticipant: Parsicipant) => {
+    updateCachedData((draft) => {
+      const remainingParticipants =
+        draft.participants?.filter(
+          (participant) => !isSameParticipant(participant.id, leftParticipant.id)
+        ) ?? []
+
+      draft.participants = remainingParticipants
+
+      if (leftParticipant.role === 'host' && remainingParticipants.length > 0) {
+        remainingParticipants[0].role = 'host'
+        if (
+          selfParticipantKey &&
+          isSameParticipant(remainingParticipants[0].id, selfParticipantKey)
+        ) {
+          draft.role = 'host'
+        }
+      }
+    })
+  }
+
+  socket.emit(socketJoinEvent, roomId)
+  socket.on(socketSnapshotEvent, onSnapshot)
+  socket.on('player_joined', onPlayerJoined)
+  socket.on('message', onMessage)
+  socket.on('user_left', onUserLeft)
+
+  return () => {
+    socket.off(socketSnapshotEvent, onSnapshot)
+    socket.off('player_joined', onPlayerJoined)
+    socket.off('message', onMessage)
+    socket.off('user_left', onUserLeft)
+    socket.disconnect()
+  }
+}
 
 export const socketApi = baseApi.injectEndpoints({
-    endpoints: (build) => ({
-        initCreatingRoom: build.query<InfoRoom & { role: 'host' | 'participant' }, number>({
-            query: (roomId) => `/create_room/${roomId}`,
+  endpoints: (build) => ({
+    initCreatingRoom: build.query<HostSnapshot, number>({
+      query: (roomId) => `/create_room/${roomId}`,
 
-            async onCacheEntryAdded(
-                roomId,
-                { cacheDataLoaded, cacheEntryRemoved, updateCachedData }
-            ) {
-                await cacheDataLoaded;
+      async onCacheEntryAdded(roomId, { cacheDataLoaded, cacheEntryRemoved, updateCachedData }) {
+        await cacheDataLoaded
 
-                const socket = socketService.connect();
-                let selfParticipantId: number | null = null;
+        const cleanup = handleRoomSocketFlow(
+          roomId,
+          'create_room',
+          'room_created',
+          updateCachedData
+        )
 
-                const resolveSelfParticipantId = (data: InfoRoom & { role?: string }) => {
-                    const rawId =
-                        (data as { participantId?: number }).participantId ??
-                        (data as { selfParticipantId?: number }).selfParticipantId ??
-                        (data as { playerId?: number }).playerId;
-                    if (typeof rawId === 'number') return rawId;
-                    if (socket.id && data.participants) {
-                        const match = data.participants.find(
-                            (participant) => String(participant.id) === socket.id
-                        );
-                        if (match) return match.id;
-                    }
-                    const last = data.participants?.[data.participants.length - 1];
-                    return typeof last?.id === 'number' ? last.id : null;
-                };
+        await cacheEntryRemoved
+        cleanup()
+      },
+    }),
+    initJoiningRoom: build.query<ParticipantSnapshot, number>({
+      query: (roomId) => `/join_room/${roomId}`,
 
-                socket.emit("create_room", roomId);
+      async onCacheEntryAdded(roomId, { cacheDataLoaded, cacheEntryRemoved, updateCachedData }) {
+        await cacheDataLoaded
 
-                socket.on("room_created", (data) => {
-                    selfParticipantId = resolveSelfParticipantId(data);
-                    updateCachedData(() => data);
-                });
+        const cleanup = handleRoomSocketFlow(
+          roomId,
+          'join_room',
+          'room_joined',
+          updateCachedData
+        )
 
-                socket.on("player_joined", (parsicipant: Parsicipant) => {
-                    updateCachedData((draft) => {
-                        const participants = draft.participants || [];
-                        if (participants.some((participant) => participant.id === parsicipant.id)) return;
-                        draft.participants = [...participants, parsicipant];
-                    });
-                });
+        await cacheEntryRemoved
+        cleanup()
+      },
+    }),
+  }),
+})
 
-                socket.on('message', (message) => {
-                    updateCachedData((draft) => {
-                        draft.messages = [...(draft.messages || []), message];
-                    });
-                });
-
-                socket.on('user_left', (parsicipant: Parsicipant) => {
-                    updateCachedData((draft) => {
-                        const participants =
-                            draft.participants?.filter((participant) => participant.id !== parsicipant.id) || [];
-                        draft.participants = participants;
-                        if (parsicipant.role === 'host' && participants.length > 0) {
-                            participants[0].role = 'host';
-                            if (selfParticipantId !== null && participants[0].id === selfParticipantId) {
-                                draft.role = 'host';
-                            }
-                        }
-                    });
-                });
-
-                await cacheEntryRemoved;
-
-                socket.disconnect();
-            }
-        }),
-        initJoiningRoom: build.query<InfoRoom & { role: 'host' | 'participant', team: TeamCommand }, number>({
-            query: (roomId) => `/join_room/${roomId}`,
-
-            async onCacheEntryAdded(
-                roomId,
-                { cacheDataLoaded, cacheEntryRemoved, updateCachedData }
-            ) {
-                await cacheDataLoaded;
-
-                const socket = socketService.connect();
-                let selfParticipantId: number | null = null;
-
-                const resolveSelfParticipantId = (data: InfoRoom & { role?: string }) => {
-                    const rawId =
-                        (data as { participantId?: number }).participantId ??
-                        (data as { selfParticipantId?: number }).selfParticipantId ??
-                        (data as { playerId?: number }).playerId;
-                    if (typeof rawId === 'number') return rawId;
-                    if (socket.id && data.participants) {
-                        const match = data.participants.find(
-                            (participant) => String(participant.id) === socket.id
-                        );
-                        if (match) return match.id;
-                    }
-                    const last = data.participants?.[data.participants.length - 1];
-                    return typeof last?.id === 'number' ? last.id : null;
-                };
-
-                socket.emit("join_room", roomId);
-
-                socket.on("room_joined", (data) => {
-                    console.log(data)
-                    selfParticipantId = resolveSelfParticipantId(data);
-                    updateCachedData(() => data);
-                });
-
-                socket.on("player_joined", (parsicipant: Parsicipant) => {
-                    updateCachedData((draft) => {
-                        const participants = draft.participants || [];
-                        if (participants.some((participant) => participant.id === parsicipant.id)) return;
-                        draft.participants = [...participants, parsicipant];
-                    });
-                });
-
-                socket.on('message', (message) => {
-                    updateCachedData((draft) => {
-                        draft.messages = [...(draft.messages || []), message];
-                    });
-                });
-
-                socket.on('user_left', (parsicipant: Parsicipant) => {
-                    updateCachedData((draft) => {
-                        const participants =
-                            draft.participants?.filter((participant) => participant.id !== parsicipant.id) || [];
-                        draft.participants = participants;
-                        if (parsicipant.role === 'host' && participants.length > 0) {
-                            participants[0].role = 'host';
-                            if (selfParticipantId !== null && participants[0].id === selfParticipantId) {
-                                draft.role = 'host';
-                            }
-                        }
-                    });
-                });
-
-                await cacheEntryRemoved;
-
-                socket.disconnect();
-            }
-        }),
-    })
-});
-
-export const { useInitCreatingRoomQuery, useInitJoiningRoomQuery } = socketApi;
+export const { useInitCreatingRoomQuery, useInitJoiningRoomQuery } = socketApi

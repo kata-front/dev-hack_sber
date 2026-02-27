@@ -1,12 +1,11 @@
-openapi: 3.0.3
+﻿openapi: 3.0.3
 info:
-  title: Dev Hack Sber API
-  version: 1.1.0
-  description: >-
-    REST endpoints inferred from the frontend RTK Query slices plus documented
-    Socket.IO interactions (see x-socket-io).
+  title: Dev Hack Sber API (Frontend Contract)
+  version: 1.0.0
+  description: Contract aligned with the current frontend requests.
 servers:
-  - url: http://localhost:3000
+  - url: http://82.24.174.86:8888/api/v1
+
 paths:
   /check_pin:
     post:
@@ -17,10 +16,6 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/CheckPinRequest"
-            examples:
-              sample:
-                value:
-                  pin: 1234
       responses:
         "200":
           description: PIN check result
@@ -28,48 +23,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LoginResponse"
-              examples:
-                ok:
-                  value:
-                    ok: true
-                    roomId: 101
-                failed:
-                  value:
-                    ok: false
+
   /create_room:
     post:
-      summary: Create a room
+      summary: Create room
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/DataFormCreateRoom"
-            examples:
-              sample:
-                value:
-                  roomId: 101
-                  roomName: Team Alpha
-                  quizTheme: History
-                  maxParticipants: 8
       responses:
         "200":
-          description: Room creation result
+          description: Room created (or conflict if already exists)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/LoginResponse"
-              examples:
-                ok:
-                  value:
-                    ok: true
-                    roomId: 101
-                failed:
-                  value:
-                    ok: false
+
   /create_room/{roomId}:
     get:
-      summary: Init room (host)
+      summary: Initial room snapshot for host
       parameters:
         - name: roomId
           in: path
@@ -79,14 +53,15 @@ paths:
             format: int64
       responses:
         "200":
-          description: Room snapshot for host
+          description: Room snapshot
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/RoomInitHostResponse"
+
   /join_room/{roomId}:
     get:
-      summary: Init room (participant)
+      summary: Initial room snapshot for participant
       parameters:
         - name: roomId
           in: path
@@ -96,14 +71,15 @@ paths:
             format: int64
       responses:
         "200":
-          description: Room snapshot for participant
+          description: Room snapshot
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/RoomInitParticipantResponse"
+
   /start_game/{roomId}:
     post:
-      summary: Start game for a room
+      summary: Start game in room
       parameters:
         - name: roomId
           in: path
@@ -116,20 +92,15 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required:
-                - roomId
-              properties:
-                roomId:
-                  type: integer
-                  format: int64
+              $ref: "#/components/schemas/StartGameRequest"
       responses:
         "200":
-          description: Game state after start
+          description: Current game state
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/GameInfo"
+
 components:
   schemas:
     CheckPinRequest:
@@ -139,7 +110,8 @@ components:
       properties:
         pin:
           type: integer
-          format: int32
+          format: int64
+
     LoginResponse:
       type: object
       required:
@@ -150,6 +122,7 @@ components:
         roomId:
           type: integer
           format: int64
+
     DataFormCreateRoom:
       type: object
       required:
@@ -168,22 +141,19 @@ components:
         maxParticipants:
           type: integer
           format: int32
+
     TeamCommand:
       type: string
-      enum:
-        - red
-        - blue
+      enum: [red, blue]
+
     StatusGame:
       type: string
-      enum:
-        - waiting
-        - active
-        - finished
+      enum: [waiting, active, finished]
+
     AnswerStatus:
       type: string
-      enum:
-        - correct
-        - incorrect
+      enum: [correct, incorrect]
+
     Question:
       type: object
       required:
@@ -200,7 +170,10 @@ components:
           items:
             type: string
         statusAnswer:
-          $ref: "#/components/schemas/AnswerStatus"
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/AnswerStatus"
+
     GameInfo:
       type: object
       required:
@@ -224,6 +197,7 @@ components:
         counter:
           type: integer
           format: int32
+
     RoomMessage:
       type: object
       required:
@@ -238,6 +212,7 @@ components:
           format: date-time
         text:
           type: string
+
     RoomMessageOutbound:
       type: object
       required:
@@ -256,6 +231,7 @@ components:
         createdAt:
           type: string
           format: date-time
+
     Participant:
       type: object
       required:
@@ -265,14 +241,12 @@ components:
         id:
           type: integer
           format: int32
-          description: Socket id
         command:
           $ref: "#/components/schemas/TeamCommand"
         role:
           type: string
-          enum:
-            - host
-            - participant
+          enum: [host, participant]
+
     InfoRoom:
       type: object
       required:
@@ -301,33 +275,43 @@ components:
             $ref: "#/components/schemas/Participant"
         gameInfo:
           $ref: "#/components/schemas/GameInfo"
+
     RoomInitHostResponse:
       allOf:
         - $ref: "#/components/schemas/InfoRoom"
         - type: object
-          required:
-            - role
+          required: [role]
           properties:
             role:
               type: string
-              enum:
-                - host
-                - participant
+              enum: [host, participant]
+            participantId:
+              type: integer
+              format: int32
+
     RoomInitParticipantResponse:
       allOf:
         - $ref: "#/components/schemas/InfoRoom"
         - type: object
-          required:
-            - role
-            - team
+          required: [role, team]
           properties:
             role:
               type: string
-              enum:
-                - host
-                - participant
+              enum: [host, participant]
             team:
               $ref: "#/components/schemas/TeamCommand"
+            participantId:
+              type: integer
+              format: int32
+
+    StartGameRequest:
+      type: object
+      required: [roomId]
+      properties:
+        roomId:
+          type: integer
+          format: int64
+
     AnswerPayload:
       type: object
       required:
@@ -347,64 +331,112 @@ components:
         team:
           $ref: "#/components/schemas/TeamCommand"
 
+    NextQuestionPayload:
+      type: object
+      required: [roomId]
+      properties:
+        roomId:
+          type: integer
+          format: int64
+
+    TimerTickPayload:
+      type: object
+      required: [counter]
+      properties:
+        counter:
+          type: integer
+          format: int32
+
 x-socket-io:
-  server: http://localhost:3000
+  server: http://82.24.174.86:8888
   namespace: "/"
   events:
     - event: create_room
       direction: client->server
-      description: Emit after GET /create_room/{roomId} to subscribe as host.
+      description: Subscribe host socket to room
       payload:
         type: integer
         format: int64
-        description: Room id number (payload is the raw roomId).
     - event: room_created
       direction: server->client
-      description: Initial snapshot after host connected.
       payload:
         $ref: "#/components/schemas/RoomInitHostResponse"
+
     - event: join_room
       direction: client->server
-      description: Emit after GET /join_room/{roomId} to subscribe as participant.
+      description: Subscribe participant socket to room
       payload:
         type: integer
         format: int64
-        description: Room id number (payload is the raw roomId).
     - event: room_joined
       direction: server->client
-      description: Initial snapshot after participant connected.
       payload:
         $ref: "#/components/schemas/RoomInitParticipantResponse"
+
     - event: player_joined
       direction: server->client
-      description: Player joined notification.
       payload:
         $ref: "#/components/schemas/Participant"
+
+    - event: user_left
+      direction: server->client
+      payload:
+        $ref: "#/components/schemas/Participant"
+
     - event: message
       direction: bidirectional
-      description: Chat message send/receive.
       payload:
         send:
           $ref: "#/components/schemas/RoomMessageOutbound"
         receive:
           $ref: "#/components/schemas/RoomMessage"
-    - event: answer
+
+    - event: start_game
       direction: client->server
-      description: Submit an answer for current question.
       payload:
-        $ref: "#/components/schemas/AnswerPayload"
+        $ref: "#/components/schemas/StartGameRequest"
+
+    - event: game_started
+      direction: server->client
+      payload:
+        $ref: "#/components/schemas/GameInfo"
+
+    - event: next_question
+      direction: client->server
+      payload:
+        $ref: "#/components/schemas/NextQuestionPayload"
+
     - event: new_question
       direction: server->client
-      description: New question for a team.
       payload:
         $ref: "#/components/schemas/Question"
+
+    - event: next_question
+      direction: server->client
+      payload:
+        $ref: "#/components/schemas/Question"
+
+    - event: answer
+      direction: client->server
+      payload:
+        $ref: "#/components/schemas/AnswerPayload"
+
     - event: check_answer
       direction: server->client
-      description: Answer result for last question.
       payload:
         $ref: "#/components/schemas/AnswerStatus"
+
+    - event: timer_tick
+      direction: server->client
+      payload:
+        $ref: "#/components/schemas/TimerTickPayload"
+
+    - event: timer_end
+      direction: server->client
+      payload:
+        $ref: "#/components/schemas/TimerTickPayload"
+
     - event: game_finished
       direction: server->client
-      description: Game finished state.
       payload:
         $ref: "#/components/schemas/StatusGame"

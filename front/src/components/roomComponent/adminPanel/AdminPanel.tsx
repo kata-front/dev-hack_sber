@@ -1,7 +1,7 @@
-﻿import { useState } from 'react'
-import './AdminPanel.scss'
+﻿import './AdminPanel.scss'
 import type { InfoRoom, TeamCommand } from '../../../shared/types'
 import type { GameViewState } from '../team/RoomView'
+import type { AdminPanelActions, AdminPanelState } from './adminTypes'
 
 type AdminPanelProps = {
   roomIdLabel: string | number
@@ -10,7 +10,12 @@ type AdminPanelProps = {
   maxParticipants?: number
   onStartGame?: () => void
   isStartDisabled?: boolean
+  onNextQuestion?: () => void
+  isNextQuestionDisabled?: boolean
+  isNextQuestionLoading?: boolean
   gameView?: GameViewState
+  adminState: AdminPanelState
+  adminActions: AdminPanelActions
 }
 
 const getTeamLabel = (team?: TeamCommand) =>
@@ -35,12 +40,13 @@ function AdminPanel({
   maxParticipants,
   onStartGame,
   isStartDisabled,
+  onNextQuestion,
+  isNextQuestionDisabled,
+  isNextQuestionLoading,
   gameView,
+  adminState,
+  adminActions,
 }: AdminPanelProps) {
-  const [isLobbyLocked, setIsLobbyLocked] = useState(false)
-  const [isChatMuted, setIsChatMuted] = useState(false)
-  const [areHintsEnabled, setAreHintsEnabled] = useState(true)
-
   const safeParticipants = participants ?? []
   const redCount = safeParticipants.filter((participant) => participant.command === 'red').length
   const blueCount = safeParticipants.filter((participant) => participant.command === 'blue').length
@@ -59,13 +65,19 @@ function AdminPanel({
     gameView && gameView.totalQuestions > 0
       ? `${gameView.activeQuestionIndex} / ${gameView.totalQuestions}`
       : '—'
-  const timerLabel = typeof gameView?.timeLeft === 'number' ? `${gameView.timeLeft}с` : '—'
+  const timerLabel =
+    gameView?.isPaused && typeof gameView?.timeLeft === 'number'
+      ? 'Пауза'
+      : typeof gameView?.timeLeft === 'number'
+        ? `${gameView.timeLeft}с`
+        : '—'
   const answerLabel =
     gameView?.answerStatus === 'correct'
       ? 'Верно'
       : gameView?.answerStatus === 'incorrect'
         ? 'Неверно'
         : '—'
+  const pauseLabel = adminState.isPaused ? 'Продолжить' : 'Пауза'
 
   return (
     <article className="room-card room-card--full room-card--admin">
@@ -137,8 +149,20 @@ function AdminPanel({
               >
                 Старт раунда
               </button>
-              <button className="room-btn room-btn--ghost" type="button">
-                Пауза
+              <button
+                className="room-btn room-btn--ghost"
+                type="button"
+                onClick={onNextQuestion}
+                disabled={isNextQuestionDisabled || isNextQuestionLoading || !onNextQuestion}
+              >
+                {isNextQuestionLoading ? 'Загрузка...' : 'Следующий вопрос'}
+              </button>
+              <button
+                className="room-btn room-btn--ghost"
+                type="button"
+                onClick={adminActions.togglePause}
+              >
+                {pauseLabel}
               </button>
             </div>
             <div className="room-admin__stat">
@@ -157,40 +181,46 @@ function AdminPanel({
             <p className="room-text">Быстрые переключатели для модерации.</p>
             <div className="room-admin__toggles">
               <button
-                className={`room-toggle ${isLobbyLocked ? 'is-active' : ''}`}
+                className={`room-toggle ${adminState.isLobbyLocked ? 'is-active' : ''}`}
                 type="button"
-                onClick={() => setIsLobbyLocked((value) => !value)}
-                aria-pressed={isLobbyLocked}
+                onClick={adminActions.toggleLobbyLock}
+                aria-pressed={adminState.isLobbyLocked}
               >
                 <span className="room-toggle__meta">
                   <span className="room-toggle__title">Закрыть вход</span>
                   <span className="room-toggle__desc">Новые участники не смогут зайти.</span>
                 </span>
-                <span className="room-toggle__pill">{isLobbyLocked ? 'Вкл' : 'Выкл'}</span>
+                <span className="room-toggle__pill">
+                  {adminState.isLobbyLocked ? 'Вкл' : 'Выкл'}
+                </span>
               </button>
               <button
-                className={`room-toggle ${isChatMuted ? 'is-active' : ''}`}
+                className={`room-toggle ${adminState.isChatMuted ? 'is-active' : ''}`}
                 type="button"
-                onClick={() => setIsChatMuted((value) => !value)}
-                aria-pressed={isChatMuted}
+                onClick={adminActions.toggleChatMuted}
+                aria-pressed={adminState.isChatMuted}
               >
                 <span className="room-toggle__meta">
                   <span className="room-toggle__title">Тихий чат</span>
                   <span className="room-toggle__desc">Сообщения временно отключены.</span>
                 </span>
-                <span className="room-toggle__pill">{isChatMuted ? 'Вкл' : 'Выкл'}</span>
+                <span className="room-toggle__pill">
+                  {adminState.isChatMuted ? 'Вкл' : 'Выкл'}
+                </span>
               </button>
               <button
-                className={`room-toggle ${areHintsEnabled ? 'is-active' : ''}`}
+                className={`room-toggle ${adminState.areHintsEnabled ? 'is-active' : ''}`}
                 type="button"
-                onClick={() => setAreHintsEnabled((value) => !value)}
-                aria-pressed={areHintsEnabled}
+                onClick={adminActions.toggleHintsEnabled}
+                aria-pressed={adminState.areHintsEnabled}
               >
                 <span className="room-toggle__meta">
                   <span className="room-toggle__title">Подсказки</span>
                   <span className="room-toggle__desc">Показывать командам наводки.</span>
                 </span>
-                <span className="room-toggle__pill">{areHintsEnabled ? 'Вкл' : 'Выкл'}</span>
+                <span className="room-toggle__pill">
+                  {adminState.areHintsEnabled ? 'Вкл' : 'Выкл'}
+                </span>
               </button>
             </div>
           </section>
@@ -219,10 +249,18 @@ function AdminPanel({
               </div>
             </div>
             <div className="room-actions-grid">
-              <button className="room-btn room-btn--ghost" type="button">
+              <button
+                className="room-btn room-btn--ghost"
+                type="button"
+                onClick={adminActions.shuffleTeams}
+              >
                 Перемешать состав
               </button>
-              <button className="room-btn room-btn--ghost" type="button">
+              <button
+                className="room-btn room-btn--ghost"
+                type="button"
+                onClick={adminActions.resetTeams}
+              >
                 Сбросить команды
               </button>
             </div>
@@ -234,4 +272,5 @@ function AdminPanel({
 }
 
 export default AdminPanel
+
 
