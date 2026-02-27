@@ -1,5 +1,5 @@
 import { baseApi } from "../../shared/baseApi";
-import type { InfoRoom, TeamCommand } from "../../shared/types";
+import type { InfoRoom, Parsicipant, TeamCommand } from "../../shared/types";
 import { socketService } from "../../shared/socketServise";
 
 export const socketApi = baseApi.injectEndpoints({
@@ -19,6 +19,12 @@ export const socketApi = baseApi.injectEndpoints({
 
                 socket.on("room_created", (data) => {
                     updateCachedData(() => data);
+                });
+
+                socket.on("player_joined", (parsicipant: Parsicipant) => {
+                    updateCachedData((draft) => {
+                        draft.participants = [...(draft.participants || []), parsicipant];
+                    });
                 });
 
                 socket.on('message', (message) => {
@@ -47,6 +53,12 @@ export const socketApi = baseApi.injectEndpoints({
 
                 socket.on("room_joined", (data) => {
                     updateCachedData(() => data);
+                });
+
+                socket.on("player_joined", (parsicipant: Parsicipant) => {
+                    updateCachedData((draft) => {
+                        draft.participants = [...(draft.participants || []), parsicipant];
+                    });
                 });
                 
                 socket.on('message', (message) => {
