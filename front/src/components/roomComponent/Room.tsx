@@ -11,8 +11,11 @@ import RedRoom from './team/RedRoom'
 import { roleSlice } from '../../shared/roleSlice'
 
 const SOCKET_EVENTS = {
+  createRoom: 'create_room',
+  joinRoom: 'join_room',
   message: 'message',
   answer: 'answer',
+  startGame: 'start_game',
 }
 
 const QUESTION_DURATION_SECONDS = 30
@@ -107,6 +110,9 @@ function Room() {
 
   const handleStartGame = async () => {
     if (!canInitRoom) return
+
+    const socket = socketService.getSocket() ?? socketService.connect()
+    socket.emit(SOCKET_EVENTS.startGame, { roomId: roomIdNumber })
 
     try {
       await startGame(roomIdNumber).unwrap()

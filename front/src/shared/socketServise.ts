@@ -5,7 +5,7 @@ class SocketService {
 
   connect() {
     if (!this.socket) {
-      this.socket = io("http://localhost:3000");
+      this.socket = io("http://82.24.174.86:8888");
     }
     return this.socket;
   }
