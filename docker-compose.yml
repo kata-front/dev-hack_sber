@@ -4,24 +4,11 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: quizbattle-api
+    environment:
+      CORS_ALLOW_ORIGINS: "*"
     ports:
       - "8888:8888"
     volumes:
       - ./backend/app:/app/app
       - ./backend/scripts:/app/scripts
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8888 --reload
-  front:
-    image: node:20-alpine
-    container_name: quizbattle-front
-    working_dir: /front
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./front:/front
-      - front_node_modules:/front/node_modules
-    command: sh -c "if [ ! -d node_modules ] || [ -z \"$(ls -A node_modules 2>/dev/null)\" ]; then npm ci; fi && npm run dev -- --host 0.0.0.0 --port 5173"
-    depends_on:
-      - api
-
-volumes:
-  front_node_modules:
+    command: uvicorn app.main:socket_app --host 0.0.0.0 --port 8888 --reload

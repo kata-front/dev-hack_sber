@@ -11,31 +11,63 @@ def utc_now() -> datetime:
 
 class GameStatus(str, Enum):
     WAITING = "waiting"
-    IN_PROGRESS = "in_progress"
+    ACTIVE = "active"
     FINISHED = "finished"
 
 
-class Team(str, Enum):
+class TeamCommand(str, Enum):
     RED = "red"
     BLUE = "blue"
 
 
+class AnswerStatus(str, Enum):
+    CORRECT = "correct"
+    INCORRECT = "incorrect"
+
+
+class ParticipantRole(str, Enum):
+    HOST = "host"
+    PARTICIPANT = "participant"
+
+
 @dataclass(slots=True)
-class Player:
-    player_id: str
-    player_name: str
-    team: Team
-    joined_at: datetime = field(default_factory=utc_now)
+class Question:
+    question: str
+    team: TeamCommand
+    answers: list[str]
+    status_answer: AnswerStatus | None = None
+
+
+@dataclass(slots=True)
+class GameInfo:
+    status: GameStatus = GameStatus.WAITING
+    active_team: TeamCommand = TeamCommand.RED
+    questions: list[Question] = field(default_factory=list)
+    active_question_index: int = 0
+    counter: int = 30
+
+
+@dataclass(slots=True)
+class RoomMessage:
+    command: TeamCommand
+    created_at: datetime
+    text: str
+
+
+@dataclass(slots=True)
+class Participant:
+    participant_id: int
+    role: ParticipantRole
+    command: TeamCommand | None = None
+    socket_sid: str | None = None
 
 
 @dataclass(slots=True)
 class Room:
-    pin: str
-    host_name: str
-    topic: str
-    questions_per_team: int
-    max_players: int
-    status: GameStatus = GameStatus.WAITING
-    created_at: datetime = field(default_factory=utc_now)
-    players: dict[str, Player] = field(default_factory=dict)
-
+    room_id: int
+    room_name: str
+    quiz_theme: str
+    max_participants: int
+    messages: list[RoomMessage] = field(default_factory=list)
+    participants: list[Participant] = field(default_factory=list)
+    game_info: GameInfo | None = None

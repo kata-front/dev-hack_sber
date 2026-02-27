@@ -1,120 +1,118 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.models.domain import GameStatus, Team
+from app.models.domain import AnswerStatus, GameStatus, ParticipantRole, TeamCommand
 
 
-def _normalize_name(value: str) -> str:
-    normalized = " ".join(value.split())
-    if not normalized:
+INT32_MAX = 2_147_483_647
+INT64_MAX = 9_223_372_036_854_775_807
+
+
+def _clean_text(value: str) -> str:
+    cleaned = " ".join(value.split())
+    if not cleaned:
         raise ValueError("must not be empty")
-    if len(normalized) < 2:
-        raise ValueError("must contain at least 2 characters")
-    if not all(ch.isprintable() for ch in normalized):
-        raise ValueError("contains non-printable characters")
-    return normalized
+    return cleaned
 
 
-class CreateRoomRequest(BaseModel):
+class CheckPinRequest(BaseModel):
+    pin: int = Field(..., ge=1, le=INT64_MAX)
+
+
+class LoginResponse(BaseModel):
+    ok: bool
+    roomId: int | None = Field(default=None, ge=1, le=INT64_MAX)
+
+
+class DataFormCreateRoom(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    host_name: str = Field(
-        ...,
-        min_length=2,
-        max_length=40,
-        description="Display name of the host.",
-        examples=["Алексей"],
-    )
-    topic: str = Field(
-        ...,
-        min_length=3,
-        max_length=120,
-        description="Topic for the quiz questions.",
-        examples=["Технологии будущего"],
-    )
-    questions_per_team: Literal[5, 6, 7] = Field(
-        ...,
-        description="Number of questions per team.",
-        examples=[7],
-    )
-    max_players: int = Field(
-        20,
-        ge=2,
-        le=100,
-        description="Maximum players allowed in room.",
-        examples=[12],
-    )
+    roomId: int = Field(..., ge=1, le=INT64_MAX)
+    roomName: str = Field(..., min_length=1, max_length=120)
+    quizTheme: str = Field(..., min_length=1, max_length=120)
+    maxParticipants: int = Field(..., ge=2, le=INT32_MAX)
 
-    @field_validator("host_name")
+    @field_validator("roomName")
     @classmethod
-    def validate_host_name(cls, value: str) -> str:
-        return _normalize_name(value)
+    def validate_room_name(cls, value: str) -> str:
+        return _clean_text(value)
 
-    @field_validator("topic")
+    @field_validator("quizTheme")
     @classmethod
-    def validate_topic(cls, value: str) -> str:
-        cleaned = " ".join(value.split())
-        if not cleaned:
-            raise ValueError("must not be empty")
+    def validate_quiz_theme(cls, value: str) -> str:
+        return _clean_text(value)
+
+
+class Question(BaseModel):
+    question: str = Field(..., min_length=1, max_length=500)
+    team: TeamCommand
+    answers: list[str] = Field(..., min_length=2, max_length=6)
+    statusAnswer: AnswerStatus | None = None
+
+    @field_validator("answers")
+    @classmethod
+    def validate_answers(cls, value: list[str]) -> list[str]:
+        cleaned = [_clean_text(item) for item in value]
+        if len(set(answer.casefold() for answer in cleaned)) != len(cleaned):
+            raise ValueError("answers must be unique")
         return cleaned
 
 
-class JoinRoomRequest(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
-
-    player_name: str = Field(
-        ...,
-        min_length=2,
-        max_length=40,
-        description="Player display name.",
-        examples=["Марина"],
-    )
-
-    @field_validator("player_name")
-    @classmethod
-    def validate_player_name(cls, value: str) -> str:
-        return _normalize_name(value)
-
-
-class PlayerResponse(BaseModel):
-    player_id: str = Field(..., examples=["9a1f1b2e08ab"])
-    player_name: str = Field(..., examples=["Марина"])
-    team: Team
-    joined_at: datetime
-
-
-class RoomSummaryResponse(BaseModel):
-    pin: str = Field(..., pattern=r"^[A-Z0-9]{6}$", examples=["A1B2C3"])
-    host_name: str
-    topic: str
-    questions_per_team: Literal[5, 6, 7]
-    max_players: int
-    players_count: int
+class GameInfo(BaseModel):
     status: GameStatus
-    created_at: datetime
+    activeTeam: TeamCommand
+    questions: list[Question]
+    activeQuestionIndex: int = Field(..., ge=0, le=INT32_MAX)
+    counter: int = Field(..., ge=0, le=INT32_MAX)
 
 
-class RoomDetailResponse(RoomSummaryResponse):
-    teams: dict[Team, list[PlayerResponse]]
+class RoomMessage(BaseModel):
+    command: TeamCommand
+    createdAt: datetime
+    text: str = Field(..., min_length=1, max_length=500)
 
 
-class CreateRoomResponse(BaseModel):
-    room: RoomDetailResponse
+class RoomMessageOutbound(BaseModel):
+    roomId: int = Field(..., ge=1, le=INT64_MAX)
+    text: str = Field(..., min_length=1, max_length=500)
+    command: TeamCommand
+    createdAt: datetime
 
 
-class JoinRoomResponse(BaseModel):
-    player: PlayerResponse
-    room: RoomDetailResponse
+class Participant(BaseModel):
+    id: int = Field(..., ge=1, le=INT32_MAX, description="Socket id")
+    command: TeamCommand | None = None
+    role: ParticipantRole
 
 
-class RoomListResponse(BaseModel):
-    rooms: list[RoomSummaryResponse]
+class InfoRoom(BaseModel):
+    roomId: int = Field(..., ge=1, le=INT64_MAX)
+    roomName: str
+    quizTheme: str
+    maxParticipants: int = Field(..., ge=2, le=INT32_MAX)
+    messages: list[RoomMessage] | None = None
+    participants: list[Participant] | None = None
+    gameInfo: GameInfo | None = None
 
 
-class ErrorResponse(BaseModel):
-    detail: str
+class RoomInitHostResponse(InfoRoom):
+    role: ParticipantRole
 
+
+class RoomInitParticipantResponse(InfoRoom):
+    role: ParticipantRole
+    team: TeamCommand
+
+
+class AnswerPayload(BaseModel):
+    roomId: int = Field(..., ge=1, le=INT64_MAX)
+    questionIndex: int = Field(..., ge=0, le=INT32_MAX)
+    answer: str = Field(..., min_length=1, max_length=300)
+    team: TeamCommand
+
+
+class StartGameRequest(BaseModel):
+    roomId: int = Field(..., ge=1, le=INT64_MAX)
