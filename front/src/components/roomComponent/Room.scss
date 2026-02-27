@@ -109,6 +109,45 @@
   font-size: 1rem;
 }
 
+.room-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.room-tag {
+  border: 1px solid var(--team-input-border);
+  background: rgba(15, 24, 40, 0.6);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+}
+
+.room-tag--idle {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.room-tag--active {
+  border-color: var(--team-border-strong);
+  background: linear-gradient(120deg, var(--team-accent-shadow), rgba(255, 255, 255, 0.08));
+}
+
+.room-tag--done {
+  border-color: rgba(128, 255, 212, 0.55);
+  background: rgba(128, 255, 212, 0.16);
+  color: #d8fff2;
+}
+
+.room-tag--danger {
+  border-color: rgba(255, 124, 124, 0.6);
+  background: rgba(255, 124, 124, 0.16);
+  color: #ffd2d2;
+}
+
 .room-actions {
   display: flex;
   flex-wrap: wrap;
@@ -190,6 +229,33 @@
   gap: 0.75rem;
 }
 
+.room-game {
+  display: grid;
+  gap: 1rem;
+}
+
+.room-game__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.room-game__meta {
+  display: grid;
+  gap: 0.5rem;
+  justify-items: end;
+}
+
+.room-game__question h3 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.room-game__answers .room-actions-grid {
+  margin-top: 0.6rem;
+}
+
 .room-chip {
   border: 1px solid var(--team-input-border);
   background: rgba(15, 24, 40, 0.6);
@@ -204,6 +270,18 @@
   transform: translateY(-2px);
   border-color: var(--team-border-strong);
   box-shadow: 0 12px 26px rgba(10, 25, 45, 0.6);
+}
+
+.room-chip.is-selected {
+  border-color: var(--team-border-strong);
+  box-shadow: 0 14px 28px var(--team-card-shadow);
+}
+
+.room-chip:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 .room-btn {

@@ -1,7 +1,7 @@
 export type startAction = 'join' | 'create' | null
 
 export type LoginResponse = {
-  ok: boolean;
+  ok: true;
   roomId?: number;
 }
 
@@ -48,7 +48,6 @@ export type InfoRoom = {
   roomName: string
   quizTheme: string
   maxParticipants: number
-  team?: TeamCommand
   messages?: RoomMessage[]
   participants?: Array<Parsicipant>
   gameInfo?: GameInfo

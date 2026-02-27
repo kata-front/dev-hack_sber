@@ -3,8 +3,11 @@ import ModalShell from './ModalShell'
 import { useCreateRoomMutation } from '../pinApi'
 import { useNavigate } from 'react-router-dom'
 import type { DataFormCreateRoom } from '../../../shared/types'
+import { useAppDispatch } from '../../../shared/redux'
+import { roleSlice } from '../../../shared/roleSlice'
 
 function CreateModal() {
+  const dispatch = useAppDispatch()
   const navigate = useNavigate()
   const [roomName, setRoomName] = useState('')
   const [quizTheme, setQuizTheme] = useState('')
@@ -48,7 +51,8 @@ function CreateModal() {
       setError('Не удалось создать комнату. Попробуйте снова.')
     }
 
-    navigate(`/room?roomId=${response.roomId}`)
+    dispatch(roleSlice.actions.setRole('host'))
+    navigate(`/room/${response.roomId}`)
   }
 
   const nameInvalid = submitted && !roomName.trim()

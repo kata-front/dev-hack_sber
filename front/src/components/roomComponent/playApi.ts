@@ -2,34 +2,35 @@ import { baseApi } from "../../shared/baseApi";
 import { socketService } from "../../shared/socketServise";
 import type { AnswerStatus, GameInfo, Question, StatusGame } from "../../shared/types";
 
+const createInitialGameInfo = (): GameInfo => ({
+    status: "waiting",
+    activeTeam: "red",
+    questions: [],
+    activeQuestionIndex: 0,
+    counter: 0,
+});
+
 export const playApi = baseApi.injectEndpoints({
     endpoints: (build) => ({
-        startGame: build.query<GameInfo, number>({
-            query: (roomId) => ({
-                url: `/start_game/${roomId}`,
-                method: "POST",
-                body: { roomId },
-            }),
+        watchGame: build.query<GameInfo, number>({
+            queryFn: () => ({ data: createInitialGameInfo() }),
 
-            async onCacheEntryAdded(_,
-                { cacheEntryRemoved, cacheDataLoaded, updateCachedData }
-            ) {
+            async onCacheEntryAdded(_, { cacheEntryRemoved, cacheDataLoaded, updateCachedData }) {
                 try {
                     await cacheDataLoaded;
                 } catch {
                     return;
                 }
 
-                const socket = socketService.getSocket();
-
-                if (!socket) {
-                    return;
-                }
+                const socket = socketService.connect();
 
                 const onNewQuestion = (question: Question) => {
                     updateCachedData((draft) => {
                         draft.questions = [...(draft.questions || []), question];
                         draft.activeQuestionIndex = draft.questions.length;
+                        if (draft.status === "waiting") {
+                            draft.status = "active";
+                        }
                     });
                 };
 
@@ -58,8 +59,16 @@ export const playApi = baseApi.injectEndpoints({
                 socket.off("new_question", onNewQuestion);
                 socket.off("check_answer", onCheckAnswer);
                 socket.off("game_finished", onGameFinished);
-            }
+            },
         }),
-
+        startGame: build.mutation<GameInfo, number>({
+            query: (roomId) => ({
+                url: `/start_game/${roomId}`,
+                method: "POST",
+                body: { roomId },
+            }),
+        }),
     }),
 });
+
+export const { useWatchGameQuery, useStartGameMutation } = playApi;

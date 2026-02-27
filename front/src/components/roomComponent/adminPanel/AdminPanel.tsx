@@ -1,12 +1,31 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import './AdminPanel.scss'
-import type { InfoRoom } from '../../../shared/types'
+import type { InfoRoom, TeamCommand } from '../../../shared/types'
+import type { GameViewState } from '../team/RoomView'
 
 type AdminPanelProps = {
   roomIdLabel: string | number
   participants?: InfoRoom['participants']
   participantsCount: number | null
   maxParticipants?: number
+  onStartGame?: () => void
+  isStartDisabled?: boolean
+  gameView?: GameViewState
+}
+
+const getTeamLabel = (team?: TeamCommand) =>
+  team === 'red' ? 'Красные' : team === 'blue' ? 'Синие' : '—'
+
+const getStatusLabel = (status?: GameViewState['status']) => {
+  if (status === 'active') return 'Игра идет'
+  if (status === 'finished') return 'Игра завершена'
+  return 'Ожидание'
+}
+
+const getStatusTone = (status?: GameViewState['status']) => {
+  if (status === 'active') return 'active'
+  if (status === 'finished') return 'done'
+  return 'idle'
 }
 
 function AdminPanel({
@@ -14,6 +33,9 @@ function AdminPanel({
   participants,
   participantsCount,
   maxParticipants,
+  onStartGame,
+  isStartDisabled,
+  gameView,
 }: AdminPanelProps) {
   const [isLobbyLocked, setIsLobbyLocked] = useState(false)
   const [isChatMuted, setIsChatMuted] = useState(false)
@@ -30,6 +52,21 @@ function AdminPanel({
       ? Math.min(100, Math.round((teamTotal / maxParticipants) * 100))
       : 0
 
+  const activeTeamLabel = getTeamLabel(gameView?.activeTeam)
+  const statusLabel = getStatusLabel(gameView?.status)
+  const statusTone = getStatusTone(gameView?.status)
+  const questionsLabel =
+    gameView && gameView.totalQuestions > 0
+      ? `${gameView.activeQuestionIndex} / ${gameView.totalQuestions}`
+      : '—'
+  const timerLabel = typeof gameView?.timeLeft === 'number' ? `${gameView.timeLeft}с` : '—'
+  const answerLabel =
+    gameView?.answerStatus === 'correct'
+      ? 'Верно'
+      : gameView?.answerStatus === 'incorrect'
+        ? 'Неверно'
+        : '—'
+
   return (
     <article className="room-card room-card--full room-card--admin">
       <div className="room-admin">
@@ -38,7 +75,7 @@ function AdminPanel({
             <p className="room-eyebrow">Панель хоста</p>
             <h2>Управление игрой</h2>
             <p className="room-text">
-              Настройте доступ, запустите раунд и следите за балансом команд.
+              Контролируйте доступ, запускайте раунды и следите за балансом команд.
             </p>
           </div>
           <div className="room-admin__status">
@@ -46,16 +83,58 @@ function AdminPanel({
             <span className="room-badge">
               Участники: {participantsCount ?? safeParticipants.length ?? '—'}
             </span>
-            <span className="room-badge">ПИН: {roomIdLabel}</span>
+            <span className="room-badge">PIN: {roomIdLabel}</span>
           </div>
         </div>
 
         <div className="room-admin__grid">
+          <section className="room-admin__panel room-admin__panel--game">
+            <h3>Состояние игры</h3>
+            <p className="room-text">Быстрый обзор текущего раунда.</p>
+            <div className="room-admin__metrics">
+              <div className="room-admin__metric">
+                <span>Статус</span>
+                <strong className={`room-admin__metric-value room-admin__metric-value--${statusTone}`}>
+                  {statusLabel}
+                </strong>
+              </div>
+              <div className="room-admin__metric">
+                <span>Вопрос</span>
+                <strong>{questionsLabel}</strong>
+              </div>
+              <div className="room-admin__metric">
+                <span>Ход</span>
+                <strong>{activeTeamLabel}</strong>
+              </div>
+              <div className="room-admin__metric">
+                <span>Таймер</span>
+                <strong>{timerLabel}</strong>
+              </div>
+              <div className="room-admin__metric">
+                <span>Ответ</span>
+                <strong>{answerLabel}</strong>
+              </div>
+            </div>
+            {gameView?.activeQuestion ? (
+              <div className="room-admin__question">
+                <p className="room-eyebrow">Вопрос № {gameView.activeQuestionIndex}</p>
+                <p className="room-admin__question-text">{gameView.activeQuestion.question}</p>
+              </div>
+            ) : (
+              <p className="room-text">Ожидаем первый вопрос.</p>
+            )}
+          </section>
+
           <section className="room-admin__panel">
             <h3>Старт и темп</h3>
             <p className="room-text">Запускайте раунды и держите динамику.</p>
             <div className="room-actions-grid">
-              <button className="room-btn room-btn--primary" type="button">
+              <button
+                className="room-btn room-btn--primary"
+                type="button"
+                onClick={onStartGame}
+                disabled={isStartDisabled || !onStartGame}
+              >
                 Старт раунда
               </button>
               <button className="room-btn room-btn--ghost" type="button">
@@ -85,9 +164,7 @@ function AdminPanel({
               >
                 <span className="room-toggle__meta">
                   <span className="room-toggle__title">Закрыть вход</span>
-                  <span className="room-toggle__desc">
-                    Новые участники не смогут зайти.
-                  </span>
+                  <span className="room-toggle__desc">Новые участники не смогут зайти.</span>
                 </span>
                 <span className="room-toggle__pill">{isLobbyLocked ? 'Вкл' : 'Выкл'}</span>
               </button>
@@ -157,3 +234,4 @@ function AdminPanel({
 }
 
 export default AdminPanel
+

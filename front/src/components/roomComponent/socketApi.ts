@@ -4,7 +4,7 @@ import { socketService } from "../../shared/socketServise";
 
 export const socketApi = baseApi.injectEndpoints({
     endpoints: (build) => ({
-        initCreatingRoom: build.query<InfoRoom & {role: 'host' | 'participant', team: TeamCommand}, number>({
+        initCreatingRoom: build.query<InfoRoom & {role: 'host' | 'participant'}, number>({
             query: (roomId) => `/create_room/${roomId}`,
 
             async onCacheEntryAdded(

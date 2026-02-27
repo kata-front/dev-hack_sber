@@ -7,14 +7,16 @@ export const pinApi = baseApi.injectEndpoints({
             query: user_pin => ({
                 url: "/check_pin",
                 method: "POST",
-                body: { pin: user_pin },
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ pin: user_pin }),
             }),
         }),
         createRoom: build.mutation<LoginResponse, DataFormCreateRoom>({
             query: roomInfo => ({
                 url: "/create_room",
                 method: "POST",
-                body: roomInfo,
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(roomInfo) || roomInfo,
             }),
         }),
     }),

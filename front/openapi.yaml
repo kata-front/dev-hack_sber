@@ -1,12 +1,12 @@
 openapi: 3.0.3
 info:
   title: Dev Hack Sber API
-  version: 1.0.0
+  version: 1.1.0
   description: >-
     REST endpoints inferred from the frontend RTK Query slices plus documented
     Socket.IO interactions (see x-socket-io).
 servers:
-  - url: http://localhost:5173
+  - url: http://localhost:3000
 paths:
   /check_pin:
     post:
@@ -49,8 +49,8 @@ paths:
               sample:
                 value:
                   roomId: 101
-                  roomName: "Team Alpha"
-                  quizTheme: "History"
+                  roomName: Team Alpha
+                  quizTheme: History
                   maxParticipants: 8
       responses:
         "200":
@@ -76,14 +76,14 @@ paths:
           required: true
           schema:
             type: integer
-            format: int32
+            format: int64
       responses:
         "200":
           description: Room snapshot for host
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RoomInitResponse"
+                $ref: "#/components/schemas/RoomInitHostResponse"
   /join_room/{roomId}:
     get:
       summary: Init room (participant)
@@ -93,14 +93,43 @@ paths:
           required: true
           schema:
             type: integer
-            format: int32
+            format: int64
       responses:
         "200":
           description: Room snapshot for participant
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RoomInitResponse"
+                $ref: "#/components/schemas/RoomInitParticipantResponse"
+  /start_game/{roomId}:
+    post:
+      summary: Start game for a room
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - roomId
+              properties:
+                roomId:
+                  type: integer
+                  format: int64
+      responses:
+        "200":
+          description: Game state after start
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GameInfo"
 components:
   schemas:
     CheckPinRequest:
@@ -120,7 +149,7 @@ components:
           type: boolean
         roomId:
           type: integer
-          format: int32
+          format: int64
     DataFormCreateRoom:
       type: object
       required:
@@ -131,7 +160,7 @@ components:
       properties:
         roomId:
           type: integer
-          format: int32
+          format: int64
         roomName:
           type: string
         quizTheme:
@@ -144,6 +173,57 @@ components:
       enum:
         - red
         - blue
+    StatusGame:
+      type: string
+      enum:
+        - waiting
+        - active
+        - finished
+    AnswerStatus:
+      type: string
+      enum:
+        - correct
+        - incorrect
+    Question:
+      type: object
+      required:
+        - question
+        - team
+        - answers
+      properties:
+        question:
+          type: string
+        team:
+          $ref: "#/components/schemas/TeamCommand"
+        answers:
+          type: array
+          items:
+            type: string
+        statusAnswer:
+          $ref: "#/components/schemas/AnswerStatus"
+    GameInfo:
+      type: object
+      required:
+        - status
+        - activeTeam
+        - questions
+        - activeQuestionIndex
+        - counter
+      properties:
+        status:
+          $ref: "#/components/schemas/StatusGame"
+        activeTeam:
+          $ref: "#/components/schemas/TeamCommand"
+        questions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Question"
+        activeQuestionIndex:
+          type: integer
+          format: int32
+        counter:
+          type: integer
+          format: int32
     RoomMessage:
       type: object
       required:
@@ -168,7 +248,7 @@ components:
       properties:
         roomId:
           type: integer
-          format: int32
+          format: int64
         text:
           type: string
         command:
@@ -180,7 +260,6 @@ components:
       type: object
       required:
         - id
-        - command
         - role
       properties:
         id:
@@ -204,7 +283,7 @@ components:
       properties:
         roomId:
           type: integer
-          format: int32
+          format: int64
         roomName:
           type: string
         quizTheme:
@@ -212,8 +291,6 @@ components:
         maxParticipants:
           type: integer
           format: int32
-        team:
-          $ref: "#/components/schemas/TeamCommand"
         messages:
           type: array
           items:
@@ -222,7 +299,21 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Participant"
-    RoomInitResponse:
+        gameInfo:
+          $ref: "#/components/schemas/GameInfo"
+    RoomInitHostResponse:
+      allOf:
+        - $ref: "#/components/schemas/InfoRoom"
+        - type: object
+          required:
+            - role
+          properties:
+            role:
+              type: string
+              enum:
+                - host
+                - participant
+    RoomInitParticipantResponse:
       allOf:
         - $ref: "#/components/schemas/InfoRoom"
         - type: object
@@ -237,6 +328,24 @@ components:
                 - participant
             team:
               $ref: "#/components/schemas/TeamCommand"
+    AnswerPayload:
+      type: object
+      required:
+        - roomId
+        - questionIndex
+        - answer
+        - team
+      properties:
+        roomId:
+          type: integer
+          format: int64
+        questionIndex:
+          type: integer
+          format: int32
+        answer:
+          type: string
+        team:
+          $ref: "#/components/schemas/TeamCommand"
 
 x-socket-io:
   server: http://localhost:3000
@@ -246,34 +355,31 @@ x-socket-io:
       direction: client->server
       description: Emit after GET /create_room/{roomId} to subscribe as host.
       payload:
-        type: object
-        required:
-          - roomId
-        properties:
-          roomId:
-            type: integer
-            format: int32
+        type: integer
+        format: int64
+        description: Room id number (payload is the raw roomId).
     - event: room_created
       direction: server->client
       description: Initial snapshot after host connected.
       payload:
-        $ref: "#/components/schemas/RoomInitResponse"
+        $ref: "#/components/schemas/RoomInitHostResponse"
     - event: join_room
       direction: client->server
       description: Emit after GET /join_room/{roomId} to subscribe as participant.
       payload:
-        type: object
-        required:
-          - roomId
-        properties:
-          roomId:
-            type: integer
-            format: int32
+        type: integer
+        format: int64
+        description: Room id number (payload is the raw roomId).
     - event: room_joined
       direction: server->client
       description: Initial snapshot after participant connected.
       payload:
-        $ref: "#/components/schemas/RoomInitResponse"
+        $ref: "#/components/schemas/RoomInitParticipantResponse"
+    - event: player_joined
+      direction: server->client
+      description: Player joined notification.
+      payload:
+        $ref: "#/components/schemas/Participant"
     - event: message
       direction: bidirectional
       description: Chat message send/receive.
@@ -282,3 +388,23 @@ x-socket-io:
           $ref: "#/components/schemas/RoomMessageOutbound"
         receive:
           $ref: "#/components/schemas/RoomMessage"
+    - event: answer
+      direction: client->server
+      description: Submit an answer for current question.
+      payload:
+        $ref: "#/components/schemas/AnswerPayload"
+    - event: new_question
+      direction: server->client
+      description: New question for a team.
+      payload:
+        $ref: "#/components/schemas/Question"
+    - event: check_answer
+      direction: server->client
+      description: Answer result for last question.
+      payload:
+        $ref: "#/components/schemas/AnswerStatus"
+    - event: game_finished
+      direction: server->client
+      description: Game finished state.
+      payload:
+        $ref: "#/components/schemas/StatusGame"
