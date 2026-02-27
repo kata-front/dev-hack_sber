@@ -1,14 +1,30 @@
 services:
-  api:
+  backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: quizbattle-api
     environment:
-      CORS_ALLOW_ORIGINS: "*"
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-*}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-*}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_TIMEOUT_SECONDS: ${GEMINI_TIMEOUT_SECONDS:-35}
+    expose:
+      - "8888"
+    restart: unless-stopped
+
+  front:
+    build:
+      context: ./front
+      dockerfile: Dockerfile
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,backend}
+    container_name: quizbattle-front
+    depends_on:
+      - backend
     ports:
-      - "8888:8888"
-    volumes:
-      - ./backend/app:/app/app
-      - ./backend/scripts:/app/scripts
-    command: uvicorn app.main:socket_app --host 0.0.0.0 --port 8888 --reload
+      - "8888:80"
+    restart: unless-stopped
