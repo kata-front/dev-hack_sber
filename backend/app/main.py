@@ -25,6 +25,14 @@ app = FastAPI(
     openapi_url=f"{API_V1_PREFIX}/openapi.json",
 )
 
+state_dir = os.getenv("STATE_DIR", "/data").strip() or "/data"
+room_state_file = os.getenv("ROOM_STATE_FILE", f"{state_dir}/rooms_state.json").strip() or f"{state_dir}/rooms_state.json"
+session_state_file = (
+    os.getenv("SESSION_STATE_FILE", f"{state_dir}/sessions_state.json").strip()
+    or f"{state_dir}/sessions_state.json"
+)
+disconnect_grace_seconds = int(os.getenv("SOCKET_DISCONNECT_GRACE_SECONDS", "20"))
+
 cors_env = os.getenv("CORS_ALLOW_ORIGINS")
 allow_origins = (
     [origin.strip() for origin in cors_env.split(",") if origin.strip()]
@@ -50,8 +58,8 @@ else:
         allow_headers=["*"],
     )
 
-app.state.room_store = RoomStore()
-app.state.session_store = SessionStore()
+app.state.room_store = RoomStore(storage_path=room_state_file)
+app.state.session_store = SessionStore(storage_path=session_state_file)
 app.state.question_generator = QuestionGenerator()
 app.include_router(rooms_router, prefix=API_V1_PREFIX)
 app.include_router(health_router, prefix=API_V1_PREFIX)
@@ -67,6 +75,7 @@ socket_gateway = SocketGateway(
     room_store=app.state.room_store,
     session_store=app.state.session_store,
     question_generator=app.state.question_generator,
+    disconnect_grace_seconds=disconnect_grace_seconds,
 )
 socket_gateway.register_handlers()
 socket_app = socketio.ASGIApp(sio, other_asgi_app=app, socketio_path="socket.io")

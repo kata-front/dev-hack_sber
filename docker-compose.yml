@@ -6,9 +6,15 @@ services:
     container_name: quizbattle-api
     environment:
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-*}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-*}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       GEMINI_TIMEOUT_SECONDS: ${GEMINI_TIMEOUT_SECONDS:-35}
+      STATE_DIR: /data
+      ROOM_STATE_FILE: /data/rooms_state.json
+      SESSION_STATE_FILE: /data/sessions_state.json
+      SOCKET_DISCONNECT_GRACE_SECONDS: ${SOCKET_DISCONNECT_GRACE_SECONDS:-20}
+    volumes:
+      - quiz_state:/data
     expose:
       - "8888"
     restart: unless-stopped
@@ -28,3 +34,6 @@ services:
     ports:
       - "8888:80"
     restart: unless-stopped
+
+volumes:
+  quiz_state:

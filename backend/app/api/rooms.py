@@ -22,9 +22,12 @@ from app.models.schemas import (
     ErrorResponse,
     GameInfoResponse,
     JoinRoomRequest,
+    KickParticipantRequest,
+    KickParticipantResponse,
     LeaveRoomResponse,
     ParticipantResponse,
     QuestionResponse,
+    RestartGameResponse,
     RoomMessageResponse,
     RoomResponse,
     ScoreResponse,
@@ -116,6 +119,7 @@ def create_room(
     room, host = room_store.create_room(
         host_name=payload.hostName,
         topic=payload.topic,
+        difficulty=payload.difficulty,
         questions_per_team=payload.questionsPerTeam,
         max_participants=payload.maxParticipants,
         timer_seconds=payload.timerSeconds,
@@ -216,6 +220,7 @@ async def start_game(
         room_snapshot = room_store.get_room_snapshot(pin=pin)
         generation = await question_generator.generate_questions(
             topic=room_snapshot.topic,
+            difficulty=room_snapshot.difficulty,
             questions_per_team=room_snapshot.questions_per_team,
         )
         room = room_store.start_game(
@@ -342,6 +347,72 @@ def leave_room(
     return LeaveRoomResponse(ok=True)
 
 
+@router.post(
+    "/{pin}/kick",
+    response_model=KickParticipantResponse,
+    responses={403: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+)
+def kick_participant(
+    payload: KickParticipantRequest,
+    request: Request,
+    pin: str = Path(..., pattern=r"^[A-Za-z0-9]{6}$"),
+    room_store: RoomStore = Depends(get_room_store),
+    session_store: SessionStore = Depends(get_session_store),
+) -> KickParticipantResponse:
+    session = _require_session(request=request, session_store=session_store, room_store=room_store)
+    if session.room_pin != pin.upper():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Session belongs to another room.")
+
+    try:
+        room, kicked = room_store.kick_participant(
+            pin=pin,
+            requested_by=session.participant_id,
+            target_participant_id=payload.participantId,
+        )
+    except RoomNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except RoomStateError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    session_store.delete_by_participant(
+        room_pin=pin.upper(),
+        participant_id=payload.participantId,
+    )
+    return KickParticipantResponse(
+        room=_to_room_response(room),
+        kickedParticipant=_to_participant_response(kicked),
+    )
+
+
+@router.post(
+    "/{pin}/restart",
+    response_model=RestartGameResponse,
+    responses={403: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+)
+def restart_game(
+    request: Request,
+    pin: str = Path(..., pattern=r"^[A-Za-z0-9]{6}$"),
+    room_store: RoomStore = Depends(get_room_store),
+    session_store: SessionStore = Depends(get_session_store),
+) -> RestartGameResponse:
+    session = _require_session(request=request, session_store=session_store, room_store=room_store)
+    if session.room_pin != pin.upper():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Session belongs to another room.")
+
+    try:
+        room = room_store.restart_game(pin=pin, requested_by=session.participant_id)
+    except RoomNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except AccessDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except RoomStateError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    return RestartGameResponse(room=_to_room_response(room))
+
+
 def _require_session(
     *,
     request: Request,
@@ -397,13 +468,14 @@ def _set_session_cookie(*, response: Response, session_id: str) -> None:
         value=session_id,
         max_age=SESSION_COOKIE_MAX_AGE,
         httponly=True,
+        path="/",
         samesite="lax",
         secure=False,
     )
 
 
 def _clear_session_cookie(response: Response) -> None:
-    response.delete_cookie(key=SESSION_COOKIE_NAME)
+    response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
 
 
 def _to_session_info(session: SessionData) -> SessionInfoResponse:
@@ -419,6 +491,7 @@ def _to_room_response(room: Room) -> RoomResponse:
     return RoomResponse(
         pin=room.pin,
         topic=room.topic,
+        difficulty=room.difficulty,
         questionsPerTeam=room.questions_per_team,
         maxParticipants=room.max_participants,
         timerSeconds=room.timer_seconds,

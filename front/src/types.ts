@@ -2,6 +2,7 @@ export type TeamCommand = 'red' | 'blue'
 export type ParticipantRole = 'host' | 'participant'
 export type GameStatus = 'waiting' | 'active' | 'finished'
 export type AnswerStatus = 'correct' | 'incorrect'
+export type GameDifficulty = 'easy' | 'medium' | 'hard'
 
 export interface Participant {
   id: string
@@ -45,6 +46,7 @@ export interface GameInfo {
 export interface Room {
   pin: string
   topic: string
+  difficulty: GameDifficulty
   questionsPerTeam: 5 | 6 | 7
   maxParticipants: number
   timerSeconds: number
@@ -84,6 +86,15 @@ export interface StartGameResponse {
   room: Room
   generationSource?: 'ai' | 'fallback'
   generationMessage?: string | null
+}
+
+export interface KickParticipantResponse {
+  room: Room
+  kickedParticipant: Participant
+}
+
+export interface RestartGameResponse {
+  room: Room
 }
 
 export interface ApiError {

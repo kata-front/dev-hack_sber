@@ -6,6 +6,7 @@ import { disconnectSocket, getSocket } from './socket'
 import type {
   AnswerStatus,
   AuthRoomResponse,
+  GameDifficulty,
   GameInfo,
   Participant,
   ParticipantRole,
@@ -24,6 +25,11 @@ type GamePreparingPayload = {
   error?: string
   source?: 'ai' | 'fallback'
   message?: string | null
+}
+
+type KickedPayload = {
+  pin?: string
+  participantId?: string
 }
 
 function formatClock(dateIso: string): string {
@@ -56,6 +62,16 @@ function teamName(team: TeamCommand | null): string {
     return 'Синяя'
   }
   return 'Без команды'
+}
+
+function difficultyName(difficulty: GameDifficulty): string {
+  if (difficulty === 'easy') {
+    return 'Легкий'
+  }
+  if (difficulty === 'hard') {
+    return 'Сложный'
+  }
+  return 'Средний'
 }
 
 function isValidName(value: string): boolean {
@@ -92,6 +108,7 @@ export default function App() {
 
   const [createHostName, setCreateHostName] = useState('')
   const [createTopic, setCreateTopic] = useState('')
+  const [createDifficulty, setCreateDifficulty] = useState<GameDifficulty>('medium')
   const [createQuestionsPerTeam, setCreateQuestionsPerTeam] = useState<5 | 6 | 7>(5)
   const [createMaxParticipants, setCreateMaxParticipants] = useState(20)
   const [createTimerSeconds, setCreateTimerSeconds] = useState(30)
@@ -117,14 +134,33 @@ export default function App() {
     disconnectSocket()
   }, [])
 
+  const syncSelfFromRoom = useCallback((snapshot: Room) => {
+    setParticipant((prev) => {
+      if (!prev) {
+        return prev
+      }
+      const updated = snapshot.participants.find((item) => item.id === prev.id)
+      if (!updated) {
+        return prev
+      }
+      return {
+        ...prev,
+        role: updated.role,
+        team: updated.team,
+        name: updated.name,
+      }
+    })
+  }, [])
+
   const syncRoom = useCallback(async (pin: string) => {
     try {
       const nextRoom = await api.getRoom(pin)
       setRoom(nextRoom)
+      syncSelfFromRoom(nextRoom)
     } catch {
       // ignore silent sync errors; authoritative failure will surface on next user action
     }
-  }, [])
+  }, [syncSelfFromRoom])
 
   const applyAuth = useCallback((payload: AuthRoomResponse) => {
     setSession(payload.session)
@@ -197,6 +233,7 @@ export default function App() {
 
     const onRoomSnapshot = (payload: Room) => {
       setRoom(payload)
+      syncSelfFromRoom(payload)
       setError(null)
       if (payload.status === 'active') {
         setIsPreparingGame(false)
@@ -304,6 +341,7 @@ export default function App() {
       setIsPreparingGame(false)
       setPreparingTopic('')
       markRoundLaunch()
+      void syncRoom(pin)
     }
 
     const onQuestion = (payload: Question) => {
@@ -372,6 +410,34 @@ export default function App() {
       void syncRoom(pin)
     }
 
+    const onGameRestarted = () => {
+      setRoom((prev) => {
+        if (!prev) {
+          return prev
+        }
+        return {
+          ...prev,
+          status: 'waiting',
+          gameInfo: null,
+        }
+      })
+      setIsPreparingGame(false)
+      setPreparingTopic('')
+      setToast('Игра перезапущена, вы снова в лобби.')
+      void syncRoom(pin)
+    }
+
+    const onKicked = (payload: KickedPayload) => {
+      if (!participant) {
+        return
+      }
+      if (payload.participantId && payload.participantId !== participant.id) {
+        return
+      }
+      setToast('Вас исключили из лобби.')
+      clearAuth()
+    }
+
     const onSocketError = (payload: { detail?: string }) => {
       setIsPreparingGame(false)
       setPreparingTopic('')
@@ -384,6 +450,7 @@ export default function App() {
 
     socket.on('room_created', onRoomSnapshot)
     socket.on('room_joined', onRoomSnapshot)
+    socket.on('room_updated', onRoomSnapshot)
     socket.on('player_joined', onPlayerJoined)
     socket.on('user_left', onUserLeft)
     socket.on('host_changed', onHostChanged)
@@ -395,6 +462,8 @@ export default function App() {
     socket.on('check_answer', onCheckAnswer)
     socket.on('timer_tick', onTimerTick)
     socket.on('game_finished', onGameFinished)
+    socket.on('game_restarted', onGameRestarted)
+    socket.on('kicked', onKicked)
     socket.on('error', onSocketError)
     socket.on('connect_error', onConnectError)
 
@@ -410,6 +479,7 @@ export default function App() {
     return () => {
       socket.off('room_created', onRoomSnapshot)
       socket.off('room_joined', onRoomSnapshot)
+      socket.off('room_updated', onRoomSnapshot)
       socket.off('player_joined', onPlayerJoined)
       socket.off('user_left', onUserLeft)
       socket.off('host_changed', onHostChanged)
@@ -421,10 +491,12 @@ export default function App() {
       socket.off('check_answer', onCheckAnswer)
       socket.off('timer_tick', onTimerTick)
       socket.off('game_finished', onGameFinished)
+      socket.off('game_restarted', onGameRestarted)
+      socket.off('kicked', onKicked)
       socket.off('error', onSocketError)
       socket.off('connect_error', onConnectError)
     }
-  }, [markRoundLaunch, participant, session, syncRoom])
+  }, [clearAuth, markRoundLaunch, participant, session, syncRoom, syncSelfFromRoom])
 
   useEffect(() => {
     if (!toast) {
@@ -454,6 +526,7 @@ export default function App() {
   const canStartGame = Boolean(
     participant?.role === 'host' && room?.status === 'waiting' && (room?.participants.length ?? 0) >= 2,
   )
+  const isLobbyPhase = room?.status === 'waiting'
 
   const canAnswer = Boolean(
     room?.status === 'active' &&
@@ -482,6 +555,7 @@ export default function App() {
       const payload = await api.createRoom({
         hostName: createHostName.trim(),
         topic: createTopic.trim(),
+        difficulty: createDifficulty,
         questionsPerTeam: createQuestionsPerTeam,
         maxParticipants: createMaxParticipants,
         timerSeconds: createTimerSeconds,
@@ -546,6 +620,7 @@ export default function App() {
       if (!socket.connected) {
         const result = await api.startGame(room.pin)
         setRoom(result.room)
+        syncSelfFromRoom(result.room)
         if (result.generationSource === 'fallback') {
           setToast(result.generationMessage ?? 'ИИ недоступен, включены запасные вопросы.')
         }
@@ -557,6 +632,54 @@ export default function App() {
       setIsPreparingGame(false)
       setPreparingTopic('')
       setError(err instanceof Error ? err.message : 'Не удалось начать игру')
+    }
+  }
+
+  const onRestartGame = async () => {
+    if (!room) {
+      return
+    }
+
+    setError(null)
+    try {
+      const socket = getSocket()
+      socket.emit('restart_game', { pin: room.pin })
+
+      if (!socket.connected) {
+        const result = await api.restartGame(room.pin)
+        setRoom(result.room)
+        syncSelfFromRoom(result.room)
+        setToast('Игра перезапущена, вы снова в лобби.')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось перезапустить игру')
+    }
+  }
+
+  const onKickParticipant = async (participantId: string, participantName: string) => {
+    if (!room || !participant) {
+      return
+    }
+    if (participant.role !== 'host') {
+      return
+    }
+
+    setError(null)
+    try {
+      const socket = getSocket()
+      socket.emit('kick_user', {
+        pin: room.pin,
+        participantId,
+      })
+
+      if (!socket.connected) {
+        const result = await api.kickParticipant(room.pin, participantId)
+        setRoom(result.room)
+        syncSelfFromRoom(result.room)
+      }
+      setToast(`Участник ${participantName} исключён из лобби.`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось исключить участника')
     }
   }
 
@@ -636,18 +759,6 @@ export default function App() {
     }
   }
 
-  const onLogout = async () => {
-    setError(null)
-    try {
-      await api.logout()
-    } catch {
-      // logout should always clear local state
-    } finally {
-      clearAuth()
-      setToast('Сессия завершена')
-    }
-  }
-
   if (booting) {
     return (
       <main className="shell shell--centered">
@@ -691,6 +802,18 @@ export default function App() {
                   onChange={(event) => setCreateTopic(event.target.value)}
                   placeholder="История России"
                 />
+              </label>
+
+              <label>
+                Сложность
+                <select
+                  value={createDifficulty}
+                  onChange={(event) => setCreateDifficulty(event.target.value as GameDifficulty)}
+                >
+                  <option value="easy">Легкий</option>
+                  <option value="medium">Средний</option>
+                  <option value="hard">Сложный</option>
+                </select>
               </label>
 
               <label>
@@ -816,6 +939,7 @@ export default function App() {
           <p className="hero__eyebrow">Комната</p>
           <h1 className="pin">{room.pin}</h1>
           <p className="meta">Тема: {room.topic}</p>
+          <p className="meta">Сложность: {difficultyName(room.difficulty)}</p>
           <p className="meta">Статус: {room.status}</p>
         </div>
 
@@ -824,123 +948,194 @@ export default function App() {
           <div className="badge">
             Роль: {participant.role === 'host' ? 'Ведущий' : 'Участник'} / Команда: {teamName(participant.team)}
           </div>
-          <button className="ghost" onClick={onLeaveRoom}>Выйти из комнаты</button>
-          <button className="ghost" onClick={onLogout}>Сбросить сессию</button>
+          <button className="ghost" onClick={onLeaveRoom}>Выйти из команды</button>
         </div>
       </section>
 
-      <section className="cards-grid cards-grid--room">
-        <article className="panel room-card">
-          <div className="room-card__head">
-            <h2>Состав команд</h2>
-            <p className="meta">Участников: {room.participants.length} / {room.maxParticipants}</p>
-          </div>
-
-          <div className="team-columns">
-            <div className="team team--red">
-              <h3>Красные</h3>
-              <ul>
-                {redTeam.length > 0
-                  ? redTeam.map((item) => <li key={item.id}>{item.name}</li>)
-                  : <li>Пока нет игроков</li>}
-              </ul>
+      {isLobbyPhase ? (
+        <section className="cards-grid cards-grid--lobby">
+          <article className="panel room-card lobby-card">
+            <div className="room-card__head">
+              <h2>Лобби ожидания</h2>
+              <p className="meta">Участников: {room.participants.length} / {room.maxParticipants}</p>
             </div>
+            <p className="meta">
+              После старта игры участники автоматически и случайно распределяются по командам.
+            </p>
 
-            <div className="team team--blue">
-              <h3>Синие</h3>
-              <ul>
-                {blueTeam.length > 0
-                  ? blueTeam.map((item) => <li key={item.id}>{item.name}</li>)
-                  : <li>Пока нет игроков</li>}
-              </ul>
-            </div>
-          </div>
-
-          {participant.role === 'host' && room.status === 'waiting' ? (
-            <button onClick={onStartGame} disabled={!canStartGame || isPreparingGame}>
-              {isPreparingGame ? 'Идёт инициализация...' : 'Запустить игру'}
-            </button>
-          ) : null}
-        </article>
-
-        <article className="panel room-card">
-          <h2>Игровой экран</h2>
-
-          {room.gameInfo ? (
-            <>
-              <div className="scoreboard">
-                <div className="score score--red">Красные: {room.gameInfo.scores.red}</div>
-                <div className="score score--blue">Синие: {room.gameInfo.scores.blue}</div>
-              </div>
-
-              <p className="meta game-meta">
-                Ход: {teamName(room.gameInfo.activeTeam)} | Таймер: {room.gameInfo.counter} сек
-              </p>
-
-              {activeQuestion ? (
-                <div className="question-box">
-                  <p className="question-team">Вопрос для команды: {teamName(activeQuestion.team)}</p>
-                  <h3>{activeQuestion.text}</h3>
-
-                  <div className="answers-grid">
-                    {activeQuestion.options.map((option, idx) => {
-                      const isSelected = activeQuestion.selectedOption === idx
-                      const disabled = !canAnswer || activeQuestion.statusAnswer !== null
-
-                      return (
-                        <button
-                          className={`answer ${isSelected ? 'answer--selected' : ''}`}
-                          key={`${idx}-${option}`}
-                          onClick={() => onAnswer(idx)}
-                          disabled={disabled}
-                        >
-                          {option}
-                        </button>
-                      )
-                    })}
+            <ul className="lobby-list">
+              {room.participants.map((item) => (
+                <li key={item.id}>
+                  <div className="lobby-list__meta">
+                    <strong>{item.name}</strong>
+                    <span>{item.role === 'host' ? 'Ведущий' : 'Участник'}</span>
                   </div>
-                </div>
-              ) : (
-                <p className="meta">Ожидание вопроса...</p>
-              )}
+                  {participant.role === 'host' && item.role !== 'host' ? (
+                    <button
+                      type="button"
+                      className="ghost lobby-list__kick"
+                      onClick={() => onKickParticipant(item.id, item.name)}
+                    >
+                      Кик
+                    </button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
 
-              {room.status === 'finished' ? <p className="winner">{winnerText(room)}</p> : null}
-            </>
-          ) : (
-            <div className="waiting-box">
-              <p>Игра ещё не запущена.</p>
-              <p className="meta">Ведущий запускает игру после подключения участников.</p>
+            {participant.role === 'host' ? (
+              <button onClick={onStartGame} disabled={!canStartGame || isPreparingGame}>
+                {isPreparingGame ? 'Идёт инициализация...' : 'Перейти к игре'}
+              </button>
+            ) : (
+              <p className="meta">Ожидание запуска от ведущего.</p>
+            )}
+          </article>
+
+          <article className="panel room-card lobby-card">
+            <h2>Параметры раунда</h2>
+            <p className="meta">Тема: {room.topic}</p>
+            <p className="meta">Сложность: {difficultyName(room.difficulty)}</p>
+            <p className="meta">Вопросов на команду: {room.questionsPerTeam}</p>
+            <p className="meta">Таймер на вопрос: {room.timerSeconds} сек</p>
+            <p className="meta">После запуска все игроки автоматически попадут на игровое поле.</p>
+          </article>
+
+          <article className="panel panel--chat room-card">
+            <h2>Чат комнаты</h2>
+
+            <div className="chat-list">
+              {room.messages.length === 0 ? <p className="meta">Пока сообщений нет.</p> : null}
+
+              {room.messages.map((msg) => (
+                <div key={msg.id} className="chat-item">
+                  <div className="chat-item__meta">
+                    <strong>{msg.authorName}</strong>
+                    <span className="meta">{teamName(msg.command)} • {formatClock(msg.createdAt)}</span>
+                  </div>
+                  <p>{msg.text}</p>
+                </div>
+              ))}
             </div>
-          )}
-        </article>
 
-        <article className="panel panel--chat room-card">
-          <h2>Чат комнаты</h2>
+            <form className="chat-form" onSubmit={onSendMessage}>
+              <input
+                value={chatText}
+                onChange={(event) => setChatText(event.target.value)}
+                placeholder="Введите сообщение"
+              />
+              <button type="submit">Отправить</button>
+            </form>
+          </article>
+        </section>
+      ) : (
+        <section className="cards-grid cards-grid--room">
+          <article className="panel room-card">
+            <div className="room-card__head">
+              <h2>Состав команд</h2>
+              <p className="meta">Участников: {room.participants.length} / {room.maxParticipants}</p>
+            </div>
 
-          <div className="chat-list">
-            {room.messages.length === 0 ? <p className="meta">Пока сообщений нет.</p> : null}
-
-            {room.messages.map((msg) => (
-              <div key={msg.id} className="chat-item">
-                <div className="chat-item__meta">
-                  <strong>{msg.authorName}</strong>
-                  <span className="meta">{teamName(msg.command)} • {formatClock(msg.createdAt)}</span>
-                </div>
-                <p>{msg.text}</p>
+            <div className="team-columns">
+              <div className="team team--red">
+                <h3>Красные</h3>
+                <ul>
+                  {redTeam.length > 0
+                    ? redTeam.map((item) => <li key={item.id}>{item.name}</li>)
+                    : <li>Пока нет игроков</li>}
+                </ul>
               </div>
-            ))}
-          </div>
 
-          <form className="chat-form" onSubmit={onSendMessage}>
-            <input
-              value={chatText}
-              onChange={(event) => setChatText(event.target.value)}
-              placeholder="Введите сообщение"
-            />
-            <button type="submit">Отправить</button>
-          </form>
-        </article>
-      </section>
+              <div className="team team--blue">
+                <h3>Синие</h3>
+                <ul>
+                  {blueTeam.length > 0
+                    ? blueTeam.map((item) => <li key={item.id}>{item.name}</li>)
+                    : <li>Пока нет игроков</li>}
+                </ul>
+              </div>
+            </div>
+          </article>
+
+          <article className="panel room-card">
+            <h2>Игровое поле</h2>
+
+            {room.gameInfo ? (
+              <>
+                <div className="scoreboard">
+                  <div className="score score--red">Красные: {room.gameInfo.scores.red}</div>
+                  <div className="score score--blue">Синие: {room.gameInfo.scores.blue}</div>
+                </div>
+
+                <p className="meta game-meta">
+                  Ход: {teamName(room.gameInfo.activeTeam)} | Таймер: {room.gameInfo.counter} сек
+                </p>
+
+                {activeQuestion ? (
+                  <div className="question-box">
+                    <p className="question-team">Вопрос для команды: {teamName(activeQuestion.team)}</p>
+                    <h3>{activeQuestion.text}</h3>
+
+                    <div className="answers-grid">
+                      {activeQuestion.options.map((option, idx) => {
+                        const isSelected = activeQuestion.selectedOption === idx
+                        const disabled = !canAnswer || activeQuestion.statusAnswer !== null
+
+                        return (
+                          <button
+                            className={`answer ${isSelected ? 'answer--selected' : ''}`}
+                            key={`${idx}-${option}`}
+                            onClick={() => onAnswer(idx)}
+                            disabled={disabled}
+                          >
+                            {option}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="meta">Ожидание вопроса...</p>
+                )}
+
+                {room.status === 'finished' ? <p className="winner">{winnerText(room)}</p> : null}
+                {room.status === 'finished' && participant.role === 'host' ? (
+                  <button onClick={onRestartGame}>Начать новую игру</button>
+                ) : null}
+              </>
+            ) : (
+              <p className="meta">Подготовка игрового поля...</p>
+            )}
+          </article>
+
+          <article className="panel panel--chat room-card">
+            <h2>Чат комнаты</h2>
+
+            <div className="chat-list">
+              {room.messages.length === 0 ? <p className="meta">Пока сообщений нет.</p> : null}
+
+              {room.messages.map((msg) => (
+                <div key={msg.id} className="chat-item">
+                  <div className="chat-item__meta">
+                    <strong>{msg.authorName}</strong>
+                    <span className="meta">{teamName(msg.command)} • {formatClock(msg.createdAt)}</span>
+                  </div>
+                  <p>{msg.text}</p>
+                </div>
+              ))}
+            </div>
+
+            <form className="chat-form" onSubmit={onSendMessage}>
+              <input
+                value={chatText}
+                onChange={(event) => setChatText(event.target.value)}
+                placeholder="Введите сообщение"
+              />
+              <button type="submit">Отправить</button>
+            </form>
+          </article>
+        </section>
+      )}
     </main>
   )
 }

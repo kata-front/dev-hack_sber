@@ -7,7 +7,7 @@ import os
 import random
 from typing import Any, Literal
 
-from app.models.domain import GeneratedQuestion
+from app.models.domain import GameDifficulty, GeneratedQuestion
 
 GenerationSource = Literal["ai", "fallback"]
 
@@ -205,12 +205,18 @@ class QuestionGenerator:
         self._model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
         self._timeout_seconds = int(os.getenv("GEMINI_TIMEOUT_SECONDS", "35"))
 
-    async def generate_questions(self, *, topic: str, questions_per_team: int) -> QuestionGenerationResult:
+    async def generate_questions(
+        self,
+        *,
+        topic: str,
+        difficulty: GameDifficulty,
+        questions_per_team: int,
+    ) -> QuestionGenerationResult:
         total = questions_per_team * 2
 
         if not self._api_key:
             return QuestionGenerationResult(
-                questions=self._fallback_questions(topic=topic, total=total),
+                questions=self._fallback_questions(topic=topic, difficulty=difficulty, total=total),
                 source="fallback",
                 reason="Gemini API key отсутствует, использованы запасные вопросы.",
             )
@@ -220,7 +226,7 @@ class QuestionGenerator:
             from google.genai import types
         except Exception:
             return QuestionGenerationResult(
-                questions=self._fallback_questions(topic=topic, total=total),
+                questions=self._fallback_questions(topic=topic, difficulty=difficulty, total=total),
                 source="fallback",
                 reason="Gemini SDK недоступен, использованы запасные вопросы.",
             )
@@ -232,26 +238,27 @@ class QuestionGenerator:
                     genai,
                     types,
                     topic,
+                    difficulty,
                     total,
                 ),
                 timeout=self._timeout_seconds,
             )
         except asyncio.TimeoutError:
             return QuestionGenerationResult(
-                questions=self._fallback_questions(topic=topic, total=total),
+                questions=self._fallback_questions(topic=topic, difficulty=difficulty, total=total),
                 source="fallback",
                 reason="Gemini не ответил вовремя, использованы запасные вопросы.",
             )
         except Exception:
             return QuestionGenerationResult(
-                questions=self._fallback_questions(topic=topic, total=total),
+                questions=self._fallback_questions(topic=topic, difficulty=difficulty, total=total),
                 source="fallback",
                 reason="Ошибка Gemini, использованы запасные вопросы.",
             )
 
         if not content:
             return QuestionGenerationResult(
-                questions=self._fallback_questions(topic=topic, total=total),
+                questions=self._fallback_questions(topic=topic, difficulty=difficulty, total=total),
                 source="fallback",
                 reason="Gemini вернул пустой ответ, использованы запасные вопросы.",
             )
@@ -259,7 +266,7 @@ class QuestionGenerator:
         parsed = self._load_json(content)
         if parsed is None:
             return QuestionGenerationResult(
-                questions=self._fallback_questions(topic=topic, total=total),
+                questions=self._fallback_questions(topic=topic, difficulty=difficulty, total=total),
                 source="fallback",
                 reason="Gemini вернул невалидный формат, использованы запасные вопросы.",
             )
@@ -268,6 +275,7 @@ class QuestionGenerator:
             parsed,
             total=total,
             topic=topic,
+            difficulty=difficulty,
         )
         if ai_valid_count == 0:
             return QuestionGenerationResult(
@@ -290,12 +298,13 @@ class QuestionGenerator:
         genai_module: Any,
         genai_types: Any,
         topic: str,
+        difficulty: GameDifficulty,
         total: int,
     ) -> str | None:
         client = genai_module.Client(api_key=self._api_key)
         response = client.models.generate_content(
             model=self._model,
-            contents=self._build_prompt(topic=topic, total=total),
+            contents=self._build_prompt(topic=topic, difficulty=difficulty, total=total),
             config=genai_types.GenerateContentConfig(
                 response_mime_type="application/json",
                 temperature=0.7,
@@ -323,10 +332,16 @@ class QuestionGenerator:
 
         return None
 
-    def _build_prompt(self, *, topic: str, total: int) -> str:
+    def _build_prompt(self, *, topic: str, difficulty: GameDifficulty, total: int) -> str:
+        difficulty_label = {
+            GameDifficulty.EASY: "легкий",
+            GameDifficulty.MEDIUM: "средний",
+            GameDifficulty.HARD: "сложный",
+        }[difficulty]
         return (
             "Сгенерируй набор вопросов для командной викторины.\n"
             f"Тема: {topic}\n"
+            f"Сложность: {difficulty_label}\n"
             f"Количество вопросов: {total}\n"
             "Требования:\n"
             "- язык строго русский\n"
@@ -378,12 +393,13 @@ class QuestionGenerator:
         *,
         total: int,
         topic: str,
+        difficulty: GameDifficulty,
     ) -> tuple[list[GeneratedQuestion], int]:
         raw_items = payload.get("questions", [])
         if not isinstance(raw_items, list):
             raw_items = []
 
-        fallback = self._fallback_questions(topic=topic, total=total)
+        fallback = self._fallback_questions(topic=topic, difficulty=difficulty, total=total)
         result: list[GeneratedQuestion] = []
         ai_valid_count = 0
 
@@ -432,19 +448,28 @@ class QuestionGenerator:
             )
         return result, ai_valid_count
 
-    def _fallback_questions(self, *, topic: str, total: int) -> list[GeneratedQuestion]:
+    def _fallback_questions(
+        self,
+        *,
+        topic: str,
+        difficulty: GameDifficulty,
+        total: int,
+    ) -> list[GeneratedQuestion]:
         normalized_topic = topic.casefold().strip()
+        preferred = [item for item in RESERVE_QUESTIONS if self._matches_difficulty(item, difficulty)]
         topical_pool = [
             item
-            for item in RESERVE_QUESTIONS
+            for item in preferred
             if item.tags and any(tag in normalized_topic for tag in item.tags)
         ]
-        neutral_pool = [item for item in RESERVE_QUESTIONS if item not in topical_pool]
+        neutral_pool = [item for item in preferred if item not in topical_pool]
+        spillover_pool = [item for item in RESERVE_QUESTIONS if item not in preferred]
 
         random.shuffle(topical_pool)
         random.shuffle(neutral_pool)
+        random.shuffle(spillover_pool)
 
-        merged_pool = topical_pool + neutral_pool
+        merged_pool = topical_pool + neutral_pool + spillover_pool
         if not merged_pool:
             raise RuntimeError("Reserve question bank is empty.")
 
@@ -461,3 +486,13 @@ class QuestionGenerator:
             )
             for item in selected
         ]
+
+    def _matches_difficulty(self, item: ReserveQuestion, difficulty: GameDifficulty) -> bool:
+        hard_tags = {"астрономия", "физика", "химия", "экономика"}
+        easy_tags = {"география", "спорт", "россия", "страны"}
+        item_tags = set(item.tags)
+        if difficulty == GameDifficulty.EASY:
+            return bool(item_tags.intersection(easy_tags)) or len(item.text) <= 62
+        if difficulty == GameDifficulty.HARD:
+            return bool(item_tags.intersection(hard_tags)) or len(item.text) >= 68
+        return True

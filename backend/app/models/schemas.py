@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
-from app.models.domain import AnswerStatus, GameStatus, ParticipantRole, TeamCommand
+from app.models.domain import AnswerStatus, GameDifficulty, GameStatus, ParticipantRole, TeamCommand
 
 PIN_PATTERN = r"^[A-Za-z0-9]{6}$"
 PIN_COMPILED = re.compile(r"^[A-Z0-9]{6}$")
@@ -68,6 +68,7 @@ class GameInfoResponse(BaseModel):
 class RoomResponse(BaseModel):
     pin: str = Field(pattern=r"^[A-Z0-9]{6}$")
     topic: str
+    difficulty: GameDifficulty
     questionsPerTeam: Literal[5, 6, 7]
     maxParticipants: int = Field(ge=2, le=100)
     timerSeconds: int = Field(ge=10, le=120)
@@ -103,6 +104,7 @@ class CreateRoomRequest(BaseModel):
 
     hostName: str = Field(..., min_length=2, max_length=40)
     topic: str = Field(..., min_length=3, max_length=120)
+    difficulty: GameDifficulty = GameDifficulty.MEDIUM
     questionsPerTeam: Literal[5, 6, 7]
     maxParticipants: int = Field(20, ge=2, le=100)
     timerSeconds: int = Field(30, ge=10, le=120)
@@ -180,6 +182,19 @@ class SendMessageRequest(BaseModel):
 
 class LeaveRoomResponse(BaseModel):
     ok: bool
+
+
+class KickParticipantRequest(BaseModel):
+    participantId: str = Field(..., min_length=1)
+
+
+class KickParticipantResponse(BaseModel):
+    room: RoomResponse
+    kickedParticipant: ParticipantResponse
+
+
+class RestartGameResponse(BaseModel):
+    room: RoomResponse
 
 
 class LogoutResponse(BaseModel):

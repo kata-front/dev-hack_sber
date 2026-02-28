@@ -21,6 +21,12 @@ class TeamCommand(str, Enum):
     BLUE = "blue"
 
 
+class GameDifficulty(str, Enum):
+    EASY = "easy"
+    MEDIUM = "medium"
+    HARD = "hard"
+
+
 class ParticipantRole(str, Enum):
     HOST = "host"
     PARTICIPANT = "participant"
@@ -77,6 +83,7 @@ class Room:
     room_id: str
     pin: str
     topic: str
+    difficulty: GameDifficulty
     questions_per_team: int
     max_participants: int
     timer_seconds: int
@@ -121,4 +128,3 @@ class GeneratedQuestion:
 
 
 JSONDict = dict[str, Any]
-

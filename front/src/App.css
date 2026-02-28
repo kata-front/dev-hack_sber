@@ -85,6 +85,10 @@
   grid-template-columns: 1.04fr 1.15fr 1fr;
 }
 
+.cards-grid--lobby {
+  grid-template-columns: 1.12fr 0.9fr 1fr;
+}
+
 .card {
   padding: 1.2rem;
 }
@@ -209,6 +213,45 @@ button.ghost {
 .room-card {
   display: grid;
   gap: 0.8rem;
+}
+
+.lobby-card {
+  align-content: start;
+}
+
+.lobby-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.52rem;
+}
+
+.lobby-list li {
+  border: 1px solid rgba(121, 154, 199, 0.25);
+  border-radius: 12px;
+  padding: 0.55rem 0.65rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(10, 17, 29, 0.7);
+}
+
+.lobby-list__meta {
+  display: grid;
+  gap: 0.12rem;
+}
+
+.lobby-list li span {
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
+.lobby-list__kick {
+  padding: 0.34rem 0.62rem;
+  font-size: 0.8rem;
+  border-radius: 10px;
 }
 
 .room-card__head {
@@ -581,7 +624,8 @@ button.ghost {
 }
 
 @media (max-width: 1180px) {
-  .cards-grid--room {
+  .cards-grid--room,
+  .cards-grid--lobby {
     grid-template-columns: 1fr 1fr;
   }
 
@@ -597,6 +641,7 @@ button.ghost {
   }
 
   .cards-grid--room,
+  .cards-grid--lobby,
   .team-columns,
   .scoreboard {
     grid-template-columns: 1fr;

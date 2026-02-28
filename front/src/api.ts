@@ -3,8 +3,11 @@ import type {
   CheckPinResponse,
   Room,
   RoomMessage,
+  RestartGameResponse,
   SessionStateResponse,
   StartGameResponse,
+  GameDifficulty,
+  KickParticipantResponse,
 } from './types'
 
 const API_BASE = '/api/v1'
@@ -60,6 +63,7 @@ export const api = {
   createRoom(payload: {
     hostName: string
     topic: string
+    difficulty: GameDifficulty
     questionsPerTeam: 5 | 6 | 7
     maxParticipants: number
     timerSeconds: number
@@ -101,5 +105,16 @@ export const api = {
 
   leaveRoom(pin: string): Promise<{ ok: boolean }> {
     return request<{ ok: boolean }>(`/rooms/${pin}/leave`, { method: 'POST' })
+  },
+
+  kickParticipant(pin: string, participantId: string): Promise<KickParticipantResponse> {
+    return request<KickParticipantResponse>(`/rooms/${pin}/kick`, {
+      method: 'POST',
+      body: JSON.stringify({ participantId }),
+    })
+  },
+
+  restartGame(pin: string): Promise<RestartGameResponse> {
+    return request<RestartGameResponse>(`/rooms/${pin}/restart`, { method: 'POST' })
   },
 }

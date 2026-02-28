@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import copy
+from datetime import datetime
+import json
+from pathlib import Path
 import random
 import string
 from threading import RLock
@@ -10,6 +13,7 @@ from app.models.domain import (
     AnswerStatus,
     ChatMessage,
     GameInfo,
+    GameDifficulty,
     GameStatus,
     GeneratedQuestion,
     Participant,
@@ -44,16 +48,19 @@ class AccessDeniedError(Exception):
 
 
 class RoomStore:
-    def __init__(self) -> None:
+    def __init__(self, *, storage_path: str | None = None) -> None:
         self._rooms: dict[str, Room] = {}
         self._sid_index: dict[str, tuple[str, str]] = {}
+        self._storage_path = Path(storage_path) if storage_path else None
         self._lock = RLock()
+        self._load_from_disk()
 
     def create_room(
         self,
         *,
         host_name: str,
         topic: str,
+        difficulty: GameDifficulty,
         questions_per_team: int,
         max_participants: int,
         timer_seconds: int,
@@ -64,12 +71,13 @@ class RoomStore:
                 participant_id=self._new_id(),
                 name=host_name,
                 role=ParticipantRole.HOST,
-                team=random.choice([TeamCommand.RED, TeamCommand.BLUE]),
+                team=None,
             )
             room = Room(
                 room_id=self._new_id(),
                 pin=pin,
                 topic=topic,
+                difficulty=difficulty,
                 questions_per_team=questions_per_team,
                 max_participants=max_participants,
                 timer_seconds=timer_seconds,
@@ -79,6 +87,7 @@ class RoomStore:
                 game_info=None,
             )
             self._rooms[pin] = room
+            self._persist_to_disk()
             snapshot = self._snapshot_room(room)
             return snapshot, snapshot.participants[0]
 
@@ -101,9 +110,10 @@ class RoomStore:
                 participant_id=self._new_id(),
                 name=player_name,
                 role=ParticipantRole.PARTICIPANT,
-                team=self._next_team(room),
+                team=None,
             )
             room.participants.append(participant)
+            self._persist_to_disk()
             snapshot = self._snapshot_room(room)
             created = self._find_participant(snapshot, participant.participant_id)
             if created is None:
@@ -146,10 +156,12 @@ class RoomStore:
 
             if not room.participants:
                 self._rooms.pop(room.pin, None)
+                self._persist_to_disk()
                 return Room(
                     room_id=room.room_id,
                     pin=room.pin,
                     topic=room.topic,
+                    difficulty=room.difficulty,
                     questions_per_team=room.questions_per_team,
                     max_participants=room.max_participants,
                     timer_seconds=room.timer_seconds,
@@ -160,6 +172,7 @@ class RoomStore:
                     game_info=room.game_info,
                 ), removed, promoted
 
+            self._persist_to_disk()
             snapshot = self._snapshot_room(room)
             return snapshot, removed, promoted
 
@@ -180,6 +193,7 @@ class RoomStore:
             if len(room.participants) < 2:
                 raise RoomStateError("Need at least 2 participants to start.")
 
+            self._assign_random_teams(room)
             questions = self._build_questions(room=room, generated_questions=generated_questions)
             room.status = GameStatus.ACTIVE
             room.game_info = GameInfo(
@@ -190,7 +204,53 @@ class RoomStore:
                 scores={TeamCommand.RED: 0, TeamCommand.BLUE: 0},
                 questions=questions,
             )
+            self._persist_to_disk()
             return self._snapshot_room(room)
+
+    def restart_game(self, *, pin: str, requested_by: str) -> Room:
+        with self._lock:
+            room = self._get_room(pin.upper())
+            requester = self._find_participant(room, requested_by)
+            if requester is None or requester.role != ParticipantRole.HOST:
+                raise AccessDeniedError("Only host can restart the game.")
+            if room.status != GameStatus.FINISHED:
+                raise RoomStateError("Game is not finished yet.")
+
+            room.status = GameStatus.WAITING
+            room.game_info = None
+            for participant in room.participants:
+                participant.team = None
+            self._persist_to_disk()
+            return self._snapshot_room(room)
+
+    def kick_participant(
+        self,
+        *,
+        pin: str,
+        requested_by: str,
+        target_participant_id: str,
+    ) -> tuple[Room, Participant]:
+        with self._lock:
+            room = self._get_room(pin.upper())
+            requester = self._find_participant(room, requested_by)
+            if requester is None or requester.role != ParticipantRole.HOST:
+                raise AccessDeniedError("Only host can kick participants.")
+            if room.status != GameStatus.WAITING:
+                raise RoomStateError("Kick is allowed only in lobby.")
+            if requested_by == target_participant_id:
+                raise RoomStateError("Host cannot kick themselves.")
+
+            target = self._find_participant(room, target_participant_id)
+            if target is None:
+                raise AccessDeniedError("Participant not found.")
+            if target.role == ParticipantRole.HOST:
+                raise RoomStateError("Host cannot be kicked.")
+
+            updated_room, removed, _ = self.leave_room(
+                pin=pin.upper(),
+                participant_id=target_participant_id,
+            )
+            return updated_room, removed
 
     def submit_answer(
         self,
@@ -239,6 +299,7 @@ class RoomStore:
                 command=participant.team,
             )
             room.messages.append(message)
+            self._persist_to_disk()
             return self._snapshot_room(room), copy.deepcopy(message)
 
     def bind_socket(self, *, pin: str, participant_id: str, sid: str) -> Room:
@@ -253,7 +314,7 @@ class RoomStore:
             self._sid_index[sid] = (room.pin, participant.participant_id)
             return self._snapshot_room(room)
 
-    def unbind_socket(self, *, sid: str) -> tuple[Room, Participant, Participant | None] | None:
+    def detach_socket(self, *, sid: str) -> tuple[str, str] | None:
         with self._lock:
             mapping = self._sid_index.pop(sid, None)
             if mapping is None:
@@ -269,7 +330,26 @@ class RoomStore:
                 return None
             if participant.socket_sid != sid:
                 return None
-            return self.leave_room(pin=pin, participant_id=participant.participant_id)
+            participant.socket_sid = None
+            self._persist_to_disk()
+            return room.pin, participant.participant_id
+
+    def remove_if_disconnected(
+        self,
+        *,
+        pin: str,
+        participant_id: str,
+    ) -> tuple[Room, Participant, Participant | None] | None:
+        with self._lock:
+            room = self._rooms.get(pin.upper())
+            if room is None:
+                return None
+            participant = self._find_participant(room, participant_id)
+            if participant is None:
+                return None
+            if participant.socket_sid is not None:
+                return None
+            return self.leave_room(pin=pin.upper(), participant_id=participant_id)
 
     def get_bound_participant(self, *, sid: str) -> tuple[str, str] | None:
         with self._lock:
@@ -322,6 +402,8 @@ class RoomStore:
             room.game_info.counter = room.timer_seconds
             next_question = copy.deepcopy(room.game_info.questions[next_index])
 
+        self._persist_to_disk()
+
         return SubmitAnswerResult(
             answer_status=answered_question.answer_status or AnswerStatus.INCORRECT,
             answered_question=copy.deepcopy(answered_question),
@@ -356,21 +438,15 @@ class RoomStore:
             raise RoomNotFoundError(f"Room with PIN '{pin}' not found.")
         return room
 
-    def _next_team(self, room: Room) -> TeamCommand:
-        red_count = 0
-        blue_count = 0
-        for participant in room.participants:
-            if participant.team is None:
-                continue
-            if participant.team == TeamCommand.RED:
-                red_count += 1
-            elif participant.team == TeamCommand.BLUE:
-                blue_count += 1
-        if red_count < blue_count:
-            return TeamCommand.RED
-        if blue_count < red_count:
-            return TeamCommand.BLUE
-        return random.choice([TeamCommand.RED, TeamCommand.BLUE])
+    def _assign_random_teams(self, room: Room) -> None:
+        if not room.participants:
+            return
+        shuffled = list(room.participants)
+        random.shuffle(shuffled)
+        first_team = random.choice([TeamCommand.RED, TeamCommand.BLUE])
+        second_team = TeamCommand.BLUE if first_team == TeamCommand.RED else TeamCommand.RED
+        for index, participant in enumerate(shuffled):
+            participant.team = first_team if index % 2 == 0 else second_team
 
     def _find_participant(self, room: Room, participant_id: str) -> Participant | None:
         for participant in room.participants:
@@ -403,6 +479,207 @@ class RoomStore:
 
     def _new_id(self) -> str:
         return uuid4().hex[:12]
+
+    def _persist_to_disk(self) -> None:
+        if self._storage_path is None:
+            return
+
+        payload = {
+            "rooms": [self._serialize_room(room) for room in self._rooms.values()],
+        }
+        try:
+            self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = self._storage_path.with_suffix(self._storage_path.suffix + ".tmp")
+            tmp_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            tmp_path.replace(self._storage_path)
+        except Exception:
+            return
+
+    def _load_from_disk(self) -> None:
+        if self._storage_path is None or not self._storage_path.exists():
+            return
+        try:
+            raw = json.loads(self._storage_path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        rooms_raw = raw.get("rooms", [])
+        if not isinstance(rooms_raw, list):
+            return
+
+        restored: dict[str, Room] = {}
+        for item in rooms_raw:
+            if not isinstance(item, dict):
+                continue
+            room = self._deserialize_room(item)
+            if room is None:
+                continue
+            restored[room.pin] = room
+
+        self._rooms = restored
+        # sockets are runtime-only and cannot be restored across process restarts
+        self._sid_index = {}
+
+    def _serialize_room(self, room: Room) -> dict[str, object]:
+        return {
+            "roomId": room.room_id,
+            "pin": room.pin,
+            "topic": room.topic,
+            "difficulty": room.difficulty.value,
+            "questionsPerTeam": room.questions_per_team,
+            "maxParticipants": room.max_participants,
+            "timerSeconds": room.timer_seconds,
+            "status": room.status.value,
+            "createdAt": room.created_at.isoformat(),
+            "participants": [self._serialize_participant(item) for item in room.participants],
+            "messages": [self._serialize_message(item) for item in room.messages],
+            "gameInfo": self._serialize_game_info(room.game_info) if room.game_info else None,
+        }
+
+    def _deserialize_room(self, raw: dict[str, object]) -> Room | None:
+        try:
+            participants_raw = raw.get("participants", [])
+            messages_raw = raw.get("messages", [])
+            if not isinstance(participants_raw, list) or not isinstance(messages_raw, list):
+                return None
+            participants = [
+                item for item in (self._deserialize_participant(entry) for entry in participants_raw) if item
+            ]
+            messages = [item for item in (self._deserialize_message(entry) for entry in messages_raw) if item]
+            game_info = self._deserialize_game_info(raw.get("gameInfo"))
+            return Room(
+                room_id=str(raw["roomId"]),
+                pin=str(raw["pin"]).upper(),
+                topic=str(raw["topic"]),
+                difficulty=GameDifficulty(str(raw.get("difficulty", "medium"))),
+                questions_per_team=int(raw["questionsPerTeam"]),
+                max_participants=int(raw["maxParticipants"]),
+                timer_seconds=int(raw["timerSeconds"]),
+                status=GameStatus(str(raw["status"])),
+                created_at=datetime.fromisoformat(str(raw["createdAt"])),
+                participants=participants,
+                messages=messages,
+                game_info=game_info,
+            )
+        except Exception:
+            return None
+
+    def _serialize_participant(self, participant: Participant) -> dict[str, object]:
+        return {
+            "id": participant.participant_id,
+            "name": participant.name,
+            "role": participant.role.value,
+            "team": participant.team.value if participant.team else None,
+            "joinedAt": participant.joined_at.isoformat(),
+        }
+
+    def _deserialize_participant(self, raw: object) -> Participant | None:
+        if not isinstance(raw, dict):
+            return None
+        try:
+            team_value = raw.get("team")
+            team = TeamCommand(str(team_value)) if team_value else None
+            return Participant(
+                participant_id=str(raw["id"]),
+                name=str(raw["name"]),
+                role=ParticipantRole(str(raw["role"])),
+                team=team,
+                joined_at=datetime.fromisoformat(str(raw["joinedAt"])),
+                socket_sid=None,
+            )
+        except Exception:
+            return None
+
+    def _serialize_message(self, message: ChatMessage) -> dict[str, object]:
+        return {
+            "id": message.message_id,
+            "text": message.text,
+            "createdAt": message.created_at.isoformat(),
+            "authorName": message.author_name,
+            "command": message.command.value if message.command else None,
+        }
+
+    def _deserialize_message(self, raw: object) -> ChatMessage | None:
+        if not isinstance(raw, dict):
+            return None
+        try:
+            command_value = raw.get("command")
+            command = TeamCommand(str(command_value)) if command_value else None
+            return ChatMessage(
+                message_id=str(raw["id"]),
+                text=str(raw["text"]),
+                created_at=datetime.fromisoformat(str(raw["createdAt"])),
+                author_name=str(raw["authorName"]),
+                command=command,
+            )
+        except Exception:
+            return None
+
+    def _serialize_game_info(self, game_info: GameInfo) -> dict[str, object]:
+        return {
+            "status": game_info.status.value,
+            "activeTeam": game_info.active_team.value,
+            "activeQuestionIndex": game_info.active_question_index,
+            "counter": game_info.counter,
+            "scores": {team.value: score for team, score in game_info.scores.items()},
+            "questions": [self._serialize_question(item) for item in game_info.questions],
+        }
+
+    def _deserialize_game_info(self, raw: object) -> GameInfo | None:
+        if raw is None:
+            return None
+        if not isinstance(raw, dict):
+            return None
+        try:
+            scores_raw = raw.get("scores", {})
+            if not isinstance(scores_raw, dict):
+                return None
+            questions_raw = raw.get("questions", [])
+            if not isinstance(questions_raw, list):
+                return None
+            questions = [item for item in (self._deserialize_question(entry) for entry in questions_raw) if item]
+            scores: dict[TeamCommand, int] = {}
+            for team in TeamCommand:
+                scores[team] = int(scores_raw.get(team.value, 0))
+            return GameInfo(
+                status=GameStatus(str(raw["status"])),
+                active_team=TeamCommand(str(raw["activeTeam"])),
+                active_question_index=int(raw["activeQuestionIndex"]),
+                counter=int(raw["counter"]),
+                scores=scores,
+                questions=questions,
+            )
+        except Exception:
+            return None
+
+    def _serialize_question(self, question: Question) -> dict[str, object]:
+        return {
+            "id": question.question_id,
+            "text": question.text,
+            "options": question.options,
+            "correctOption": question.correct_option,
+            "team": question.team.value,
+            "answered": question.answered,
+            "selectedOption": question.selected_option,
+            "statusAnswer": question.answer_status.value if question.answer_status else None,
+        }
+
+    def _deserialize_question(self, raw: object) -> Question | None:
+        if not isinstance(raw, dict):
+            return None
+        try:
+            status_value = raw.get("statusAnswer")
+            return Question(
+                question_id=str(raw["id"]),
+                text=str(raw["text"]),
+                options=[str(item) for item in list(raw.get("options", []))],
+                correct_option=int(raw["correctOption"]),
+                team=TeamCommand(str(raw["team"])),
+                answered=bool(raw.get("answered", False)),
+                selected_option=int(raw["selectedOption"]) if raw.get("selectedOption") is not None else None,
+                answer_status=AnswerStatus(str(status_value)) if status_value else None,
+            )
+        except Exception:
+            return None
 
     def _snapshot_room(self, room: Room) -> Room:
         return copy.deepcopy(room)

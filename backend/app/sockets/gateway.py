@@ -58,6 +58,11 @@ class SocketLeavePayload(BaseModel):
     pin: str = Field(..., pattern=r"^[A-Za-z0-9]{6}$")
 
 
+class SocketKickPayload(BaseModel):
+    pin: str = Field(..., pattern=r"^[A-Za-z0-9]{6}$")
+    participantId: str
+
+
 class SocketGateway:
     def __init__(
         self,
@@ -66,27 +71,34 @@ class SocketGateway:
         room_store: RoomStore,
         session_store: SessionStore,
         question_generator: QuestionGenerator,
+        disconnect_grace_seconds: int = 20,
     ) -> None:
         self._sio = sio
         self._room_store = room_store
         self._session_store = session_store
         self._question_generator = question_generator
         self._timer_tasks: dict[str, asyncio.Task[None]] = {}
+        self._disconnect_grace_seconds = max(1, disconnect_grace_seconds)
+        self._disconnect_tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
 
     def register_handlers(self) -> None:
         self._sio.on("create_room", handler=self._on_create_room)
         self._sio.on("join_room", handler=self._on_join_room)
         self._sio.on("message", handler=self._on_message)
         self._sio.on("start_game", handler=self._on_start_game)
+        self._sio.on("restart_game", handler=self._on_restart_game)
         self._sio.on("answer", handler=self._on_answer)
+        self._sio.on("kick_user", handler=self._on_kick_user)
         self._sio.on("leave_room", handler=self._on_leave_room)
         self._sio.on("disconnect", handler=self._on_disconnect)
 
     async def _on_create_room(self, sid: str, raw_payload: Any) -> None:
         try:
             payload = SocketJoinPayload.model_validate(raw_payload)
+            normalized_pin = payload.pin.upper()
+            self._cancel_disconnect_cleanup(pin=normalized_pin, participant_id=payload.participantId)
             room = self._room_store.bind_socket(
-                pin=payload.pin.upper(),
+                pin=normalized_pin,
                 participant_id=payload.participantId,
                 sid=sid,
             )
@@ -101,13 +113,15 @@ class SocketGateway:
     async def _on_join_room(self, sid: str, raw_payload: Any) -> None:
         try:
             payload = SocketJoinPayload.model_validate(raw_payload)
+            normalized_pin = payload.pin.upper()
+            self._cancel_disconnect_cleanup(pin=normalized_pin, participant_id=payload.participantId)
             room = self._room_store.bind_socket(
-                pin=payload.pin.upper(),
+                pin=normalized_pin,
                 participant_id=payload.participantId,
                 sid=sid,
             )
             participant = self._room_store.get_participant_snapshot(
-                pin=payload.pin.upper(),
+                pin=normalized_pin,
                 participant_id=payload.participantId,
             )
         except (ValueError, RoomNotFoundError, AccessDeniedError) as exc:
@@ -163,6 +177,7 @@ class SocketGateway:
             preparing_emitted = True
             generation = await self._question_generator.generate_questions(
                 topic=room_snapshot.topic,
+                difficulty=room_snapshot.difficulty,
                 questions_per_team=room_snapshot.questions_per_team,
             )
             room = self._room_store.start_game(
@@ -191,6 +206,7 @@ class SocketGateway:
             },
             room=room_name,
         )
+        await self._sio.emit("room_updated", self._to_room_payload(room), room=room_name)
         await self._sio.emit("game_started", self._to_game_info_payload(room.game_info), room=room_name)
         await self._sio.emit(
             "new_question",
@@ -226,12 +242,65 @@ class SocketGateway:
             await self._sio.emit("next_question", question_payload, room=room_name)
             await self._restart_timer(pin=payload.pin.upper())
 
+    async def _on_restart_game(self, sid: str, raw_payload: Any) -> None:
+        try:
+            payload = SocketStartPayload.model_validate(raw_payload)
+            _, participant_id = self._require_bound_actor(sid=sid, pin=payload.pin.upper())
+            room = self._room_store.restart_game(
+                pin=payload.pin.upper(),
+                requested_by=participant_id,
+            )
+        except (ValueError, RoomNotFoundError, AccessDeniedError, RoomStateError) as exc:
+            await self._emit_error(sid=sid, message=str(exc))
+            return
+
+        await self._cancel_timer(pin=payload.pin.upper())
+        room_name = self._socket_room(payload.pin.upper())
+        await self._sio.emit("room_updated", self._to_room_payload(room), room=room_name)
+        await self._sio.emit("game_restarted", {"status": room.status.value}, room=room_name)
+
+    async def _on_kick_user(self, sid: str, raw_payload: Any) -> None:
+        try:
+            payload = SocketKickPayload.model_validate(raw_payload)
+            normalized_pin = payload.pin.upper()
+            _, requester_id = self._require_bound_actor(sid=sid, pin=normalized_pin)
+            self._cancel_disconnect_cleanup(pin=normalized_pin, participant_id=payload.participantId)
+            room, kicked = self._room_store.kick_participant(
+                pin=normalized_pin,
+                requested_by=requester_id,
+                target_participant_id=payload.participantId,
+            )
+        except (ValueError, RoomNotFoundError, AccessDeniedError, RoomStateError) as exc:
+            await self._emit_error(sid=sid, message=str(exc))
+            return
+
+        self._session_store.delete_by_participant(
+            room_pin=normalized_pin,
+            participant_id=payload.participantId,
+        )
+        room_name = self._socket_room(normalized_pin)
+        kicked_payload = self._to_participant_payload(kicked)
+        await self._sio.emit("user_left", kicked_payload, room=room_name)
+        await self._sio.emit("room_updated", self._to_room_payload(room), room=room_name)
+        if kicked.socket_sid:
+            await self._sio.emit(
+                "kicked",
+                {"pin": normalized_pin, "participantId": kicked.participant_id},
+                room=kicked.socket_sid,
+            )
+            try:
+                await self._sio.disconnect(kicked.socket_sid)
+            except Exception:
+                pass
+
     async def _on_leave_room(self, sid: str, raw_payload: Any) -> None:
         try:
             payload = SocketLeavePayload.model_validate(raw_payload)
-            _, participant_id = self._require_bound_actor(sid=sid, pin=payload.pin.upper())
+            normalized_pin = payload.pin.upper()
+            _, participant_id = self._require_bound_actor(sid=sid, pin=normalized_pin)
+            self._cancel_disconnect_cleanup(pin=normalized_pin, participant_id=participant_id)
             room, left_participant, promoted = self._room_store.leave_room(
-                pin=payload.pin.upper(),
+                pin=normalized_pin,
                 participant_id=participant_id,
             )
         except (ValueError, RoomNotFoundError, AccessDeniedError) as exc:
@@ -239,7 +308,7 @@ class SocketGateway:
             return
 
         await self._cancel_timer_if_empty(room=room)
-        room_name = self._socket_room(payload.pin.upper())
+        room_name = self._socket_room(normalized_pin)
         await self._sio.emit(
             "user_left",
             self._to_participant_payload(left_participant),
@@ -248,7 +317,7 @@ class SocketGateway:
         )
         if promoted is not None:
             self._session_store.update_role(
-                room_pin=payload.pin.upper(),
+                room_pin=normalized_pin,
                 participant_id=promoted.participant_id,
                 role=promoted.role,
             )
@@ -256,27 +325,46 @@ class SocketGateway:
         await self._sio.leave_room(sid, room_name)
 
     async def _on_disconnect(self, sid: str, *args: Any) -> None:
-        result = self._room_store.unbind_socket(sid=sid)
-        if result is None:
+        detached = self._room_store.detach_socket(sid=sid)
+        if detached is None:
             return
+        pin, participant_id = detached
+        self._cancel_disconnect_cleanup(pin=pin, participant_id=participant_id)
+        task = asyncio.create_task(self._delayed_disconnect_cleanup(pin=pin, participant_id=participant_id))
+        self._disconnect_tasks[(pin, participant_id)] = task
 
-        room, left_participant, promoted = result
-        await self._cancel_timer_if_empty(room=room)
-        room_name = self._socket_room(room.pin)
+    async def _delayed_disconnect_cleanup(self, *, pin: str, participant_id: str) -> None:
+        key = (pin, participant_id)
+        try:
+            await asyncio.sleep(self._disconnect_grace_seconds)
+            result = self._room_store.remove_if_disconnected(pin=pin, participant_id=participant_id)
+            if result is None:
+                return
+            room, left_participant, promoted = result
+            await self._cancel_timer_if_empty(room=room)
+            room_name = self._socket_room(room.pin)
 
-        await self._sio.emit(
-            "user_left",
-            self._to_participant_payload(left_participant),
-            room=room_name,
-            skip_sid=sid,
-        )
-        if promoted is not None:
-            self._session_store.update_role(
-                room_pin=room.pin,
-                participant_id=promoted.participant_id,
-                role=promoted.role,
+            await self._sio.emit(
+                "user_left",
+                self._to_participant_payload(left_participant),
+                room=room_name,
             )
-            await self._sio.emit("host_changed", self._to_participant_payload(promoted), room=room_name)
+            if promoted is not None:
+                self._session_store.update_role(
+                    room_pin=room.pin,
+                    participant_id=promoted.participant_id,
+                    role=promoted.role,
+                )
+                await self._sio.emit("host_changed", self._to_participant_payload(promoted), room=room_name)
+        except asyncio.CancelledError:
+            return
+        finally:
+            self._disconnect_tasks.pop(key, None)
+
+    def _cancel_disconnect_cleanup(self, *, pin: str, participant_id: str) -> None:
+        task = self._disconnect_tasks.pop((pin, participant_id), None)
+        if task is not None:
+            task.cancel()
 
     def _require_bound_actor(self, *, sid: str, pin: str) -> tuple[str, str]:
         mapping = self._room_store.get_bound_participant(sid=sid)
@@ -359,6 +447,7 @@ class SocketGateway:
         payload = RoomResponse(
             pin=room.pin,
             topic=room.topic,
+            difficulty=room.difficulty,
             questionsPerTeam=room.questions_per_team,
             maxParticipants=room.max_participants,
             timerSeconds=room.timer_seconds,
